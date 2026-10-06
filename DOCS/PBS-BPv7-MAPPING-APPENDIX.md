@@ -2,7 +2,7 @@
 **Document ID:** PBS-BPv7-MAPPING-APPENDIX  
 **Status:** Reference Draft  
 **Applies To:** PBS-EDGE-ADAPTER-MV  
-**References:** PBS-ENV-01 v1.3, PBS-DTN-MAP-01 v1.3, PBS-DTN-MAP-02 v1.4, IETF RFC 9171 (Bundle Protocol Version 7)
+**References:** PBS-ENV-01 v1.5, PBS-DTN-MAP-01 v1.5, PBS-DTN-MAP-02 v1.5 (PBS v1.5.0), IETF RFC 9171 (Bundle Protocol Version 7)
 
 ---
 
@@ -10,7 +10,7 @@
 
 This appendix defines how the PBS Edge Adapter encapsulates one PBS-ENV-01 v1.3 envelope in one BPv7 bundle. `pbs_edge_adapter_worked_example.py` (`pbs_to_bpv7_bundle_mv`) implements Sections A.3 to A.8 and A.10. Section A.9 defines the inbound direction, which the worked example does not implement.
 
-PBS specifications are in [PBS-PROTOCOL-OPEN](https://github.com/Pale-Blue-Systems/PBS-PROTOCOL-OPEN/tree/main/PBS-RFC-LIB). Both PBS mapping documents apply. PBS-DTN-MAP-01 (v1.3) defines the envelope-to-bundle mapping at a gateway boundary. PBS-DTN-MAP-02 (v1.4) defines endpoint mapping, lifetime and freshness, priority and QoS, service intent and security rules for BPv7 carriage.
+PBS specifications are in [PBS-PROTOCOL-OPEN](https://github.com/Pale-Blue-Systems/PBS-PROTOCOL-OPEN/tree/main/PBS-RFC-LIB). Both PBS mapping documents apply. PBS-DTN-MAP-01 (v1.5) defines the envelope-to-bundle mapping at a gateway boundary. PBS-DTN-MAP-02 (v1.5) defines endpoint mapping, lifetime and freshness, priority and QoS, service intent and security rules for BPv7 carriage. PBS-DTN-MAP-01 Sections 6.1 and 6.3 refer to PBS-DTN-MAP-02 Section 4 for finite lifetime limits and Section 5 for the mapping profile.
 
 ---
 
@@ -19,7 +19,7 @@ PBS specifications are in [PBS-PROTOCOL-OPEN](https://github.com/Pale-Blue-Syste
 1. **One envelope, one bundle.** Each envelope maps to exactly one bundle (PBS-DTN-MAP-01 Section 5.1). PBS-DTN-MAP-02 Section 2 states that one PBS protocol data unit SHOULD map to one BP application data unit.
 2. **Opaque envelope.** The complete envelope, 44-byte header and payload, is the payload block content, unmodified (PBS-DTN-MAP-01 Sections 6.2 and 6.4).
 3. **Configured addressing.** The destination EID, source node ID and report-to EID come from the Authority Context map (Section A.5).
-4. **Bounded lifetime.** For TTL > 0, the bundle lifetime ends no later than Timestamp + TTL and does not exceed TTL × 1000 ms (PBS-DTN-MAP-02 Section 4).
+4. **Bounded lifetime.** For TTL > 0, the bundle lifetime ends no later than Timestamp + TTL and does not exceed TTL × 1000 ms (PBS-DTN-MAP-01 Section 6.1; PBS-DTN-MAP-02 Section 4). For TTL 0 it is the configured no-expiry lifetime (PBS-DTN-MAP-01 Section 6.1.1).
 5. **Determinism.** Identical envelope bytes, Authority Context entry, configured default lifetime, sequence number and clock reading produce identical bundle bytes.
 
 ---
@@ -31,15 +31,15 @@ The adapter accepts a PBS-ENV-01 v1.3 envelope: a fixed 44-byte big-endian heade
 | Offset | Field | Type | Adapter use |
 |--------|-------|------|-------------|
 | 0x00 | Magic | u8, `0x10` | Validated |
-| 0x01 | Priority | u8; 0 CRITICAL, 1 HIGH, 2 NORMAL, 3 LOW, 4 BULK | Validated; 5–255 rejected. Not mapped to a bundle field. |
+| 0x01 | Priority | u8; 0 CRITICAL, 1 HIGH, 2 NORMAL, 3 LOW, 4 BULK | Validated; 5–255 rejected. Not mapped to a bundle field or flag (Section A.6.3) |
 | 0x02 | Flags | u8; `0x01` = ACK requested | Not used |
 | 0x03 | Reserved | u8, `0x00` | Not used |
-| 0x04 | Sequence | u16 | Not used |
+| 0x04 | Sequence | u16 | Not used; not mapped to a bundle field (Section A.6.3) |
 | 0x06 | Reserved | u16, `0x0000` | Not used |
 | 0x08 | Source ID | 16 bytes, null-padded UTF-8 | Not used |
 | 0x18 | Timestamp | u64, Unix time in microseconds | Envelope age (Section A.6.2) |
 | 0x20 | Size | u32, payload length in bytes | Input length must equal 44 + `Size` |
-| 0x24 | TTL | u32, seconds; `0` = no expiry | Expiry check and lifetime bound (Section A.6.2) |
+| 0x24 | TTL | u32, seconds; `0` = no expiry | Expiry check and lifetime bound (Section A.6.2); not modified |
 | 0x28 | CRC32 | u32 | Verified: IEEE 802.3 CRC-32 over bytes 0x00–0x2B with 0x28–0x2B set to zero, stored big-endian (PBS-ENV-01 Section 13) |
 
 The header contains no destination, scope, authority or message identifier field, and no version field other than Magic. No header field contributes to a bundle EID. Every header byte and the payload travel unmodified in the payload block (Section A.7).
@@ -55,7 +55,7 @@ The bundle is a CBOR indefinite-length array: the primary block, the payload blo
 | Element | Value | RFC 9171 |
 |---------|-------|----------|
 | Version | 7 | 4.3.1 |
-| Bundle processing control flags | 0; 0x04 (bundle must not be fragmented) when the source is the null endpoint | 4.2.3 |
+| Bundle processing control flags | 0; 0x04 (bundle must not be fragmented) when the source is the null endpoint. No reserved or unassigned flag (PBS-DTN-MAP-01 Section 6.3; Section A.6.3) | 4.2.3 |
 | CRC type | 2 (CRC32C) | 4.2.1 |
 | Destination EID | Authority Context `dest` | 4.3.1 |
 | Source node ID | Authority Context `src` (Section A.5.3) | 4.2.5.1.1, 4.2.5.2, 4.3.1; RFC 9758 Section 5.3 |
@@ -107,22 +107,26 @@ The worked example does not implement the PBS-DTN-MAP-01 Section 8 translation o
 ### A.6.1 Creation Timestamp
 
 - **Creation time.** DTN time is the number of milliseconds elapsed since 2000-01-01 00:00:00 +0000 (UTC) and is not affected by leap seconds (RFC 9171 Section 4.2.6). RFC 9171 defines no conversion from Unix time. The adapter computes creation time = Unix time in ms − 946 684 800 000, the offset ION bpv7 uses (`EPOCH_2000_SEC` = 946 684 800 s in `bpv7/library/bpP.h`, <https://github.com/nasa-jpl/ION-DTN>). Unix time omits the 5 leap seconds inserted since 2000-01-01, so the result is 5000 ms less than a count of elapsed SI milliseconds. The adapter truncates one reading of the clock (`clock_us`, Unix time in microseconds) to whole milliseconds. A clock reading at or before the DTN epoch is rejected, because DTN time 0 means "time unknown".
-- **Sequence number.** RFC 9171 Section 4.2.7 takes the sequence number from a counter managed by the source node's bundle protocol agent. The worked example takes it as the `creation_seq` argument.
+- **Sequence number.** PBS-DTN-MAP-01 Section 6.1 assigns the creation timestamp to the gateway's bundle protocol agent, as RFC 9171 Section 4.2.7 specifies: the sequence number is the latest value of a monotonically increasing counter, which MAY be reset to zero whenever the time advances by one millisecond. The worked example is not a bundle protocol agent; it builds the bundle bytes and assigns the creation timestamp itself. Unless the caller passes `creation_seq`, the adapter's `CreationTimestampCounter` supplies the sequence number: 0 for the first bundle whose creation time is later than any the counter has seen, and one higher for each further bundle. Two bundles created in the same millisecond therefore have different creation timestamps. The counter is not reset when the clock steps back, and a creation timestamp issued before such a step can then recur. One counter serves one adapter; `ADAPTER_SEQUENCE_COUNTER` is used when the caller passes none. A caller-supplied `creation_seq` is used as given and does not advance the counter; the caller then keeps the creation timestamps unique. The adapter does not read the envelope Sequence field (PBS-DTN-MAP-01 Section 6.1).
 
 ### A.6.2 Lifetime
 
-PBS-DTN-MAP-02 Section 4 requires a lifetime that cannot extend the PBS message beyond its expiry. Let *D* be the configured default lifetime in ms (*D* > 0), *T* the envelope TTL in seconds, and *age* = max(0, now − Timestamp) in µs, with now taken from the same clock reading as the creation time. A Timestamp later than the adapter clock gives age 0.
+PBS-DTN-MAP-01 Section 6.1 and PBS-DTN-MAP-02 Section 4 require a lifetime that cannot extend the PBS message beyond its expiry. Let *D* be the configured default lifetime (`default_lifetime_ms`), 1 ≤ *D* ≤ 4 294 967 295 000 ms, *T* the envelope TTL in seconds, and *age* = max(0, now − Timestamp) in µs, with now taken from the same clock reading as the creation time. A Timestamp later than the adapter clock gives age 0.
 
 | Condition | Result | Rule |
 |-----------|--------|------|
-| *T* = 0 | lifetime = *D* | Not defined by PBS-DTN-MAP-01 or PBS-DTN-MAP-02; see "TTL 0" below |
+| *T* = 0 | lifetime = *D* | PBS-DTN-MAP-01 Section 6.1.1; PBS-DTN-MAP-02 Section 4; see "TTL 0" below |
 | *T* > 0 and *age* > *T* × 10⁶ µs | rejected, `EnvelopeExpiredError` | PBS-ENV-01 Sections 12.1, 12.2 and 15: gateways discard expired envelopes |
-| *T* > 0, *remaining* ≤ 0 | rejected, `EnvelopeExpiredError` | Less than 1 ms remains; no positive lifetime fits |
-| *T* > 0, otherwise | lifetime = min(*D*, *remaining*) | PBS-DTN-MAP-02 Section 4 |
+| *T* > 0, *remaining* ≤ 0 | rejected, `EnvelopeExpiredError` | Less than 1 ms remains; PBS-DTN-MAP-01 Section 6.1: not encapsulated |
+| *T* > 0, otherwise | lifetime = min(*D*, *remaining*) | PBS-DTN-MAP-01 Section 6.1; PBS-DTN-MAP-02 Section 4 |
 
-*remaining* = ⌊(*T* × 10⁶ − *age*) / 1000⌋ ms, which equals *T* × 1000 minus the age in milliseconds rounded up. Because creation time and age come from one clock reading, creation time + lifetime never exceeds Timestamp + TTL on the DTN time scale, and the lifetime never exceeds *T* × 1000 ms.
+*remaining* = ⌊(*T* × 10⁶ − *age*) / 1000⌋ ms, which equals *T* × 1000 minus the age in milliseconds rounded up. This is the PBS-DTN-MAP-01 Section 6.1 bound computed with the clock reading in place of the creation time; the creation time is that reading truncated to whole milliseconds, so it is not later than the reading. Creation time + lifetime therefore never exceeds Timestamp + TTL on the DTN time scale, and the lifetime never exceeds *T* × 1000 ms.
 
-**TTL 0.** An envelope with TTL 0 never expires (PBS-ENV-01 Section 12.1). PBS-DTN-MAP-01 Section 6.1 converts TTL seconds to lifetime and states no TTL 0 case. PBS-DTN-MAP-02 Section 4 requires a computed bound only for finite deadlines or freshness limits. Neither specification defines the bundle lifetime for TTL 0. The adapter uses *D*. When the bundle's age exceeds *D*, the bundle protocol agent deletes the bundle (RFC 9171 Section 5.5), and the envelope it carries is discarded (PBS-DTN-MAP-01 Section 7.3). A TTL 0 envelope therefore reaches its destination only if its bundle is delivered before the bundle's age exceeds *D*.
+**TTL 0.** An envelope with TTL 0 never expires (PBS-ENV-01 Section 12.1), and BPv7 defines no unlimited lifetime (RFC 9171 Section 4.3.1). PBS-DTN-MAP-01 Section 6.1.1 sets the bundle lifetime for TTL 0 to the gateway's no-expiry lifetime unless a PBS-DTN-MAP-02 Section 4 finite limit (deadline, maximum age or mission expiry) applies; PBS-DTN-MAP-02 Section 4 sets a no-expiry lifetime with the same bounds when no finite limit applies. The worked example reads no Service Intent frame and no mission expiry policy, so it applies no such limit, and *D* is its no-expiry lifetime. Section 6.1.1 requires that lifetime to be greater than 0 ms, not less than any lifetime the gateway assigns to an envelope with TTL > 0 (min(*D*, *remaining*) ≤ *D*), at most 4 294 967 295 000 ms, and a value for which the bundle protocol agent computes creation time + lifetime without overflow. `bundle_lifetime_ms` raises `ValueError` for *D* outside 1 to 4 294 967 295 000 ms. The worked example connects to no agent and does not check the overflow condition.
+
+Section 6.1.1 also requires the gateway to document its no-expiry lifetime and the bundle protocol agent for which it was selected, and recommends the largest value that meets these conditions: 4 294 967 295 000 ms for an agent that holds DTN time and expiration time in 64-bit integers. An agent that holds expiration time as a 32-bit count of seconds wraps that value into the past and deletes the bundle at once. `pbs_to_bpv7_bundle_mv` defaults *D* to 60 000 ms, and the worked example run uses 300 000 ms; neither is selected for a particular agent (Appendix B, Section B.5).
+
+When the bundle's age exceeds *D*, or an overriding lifetime that a node's agent imposes (RFC 9171 Section 4.3.1), the bundle protocol agent deletes the bundle (RFC 9171 Section 5.5) and the envelope with it. That deletion is not TTL expiry (PBS-DTN-MAP-01 Sections 6.1.1 and 7.3). A TTL 0 envelope therefore reaches its destination only if its bundle is delivered before the bundle's age exceeds *D*.
 
 Examples with *D* = 60 000 ms, taken from the tests:
 
@@ -137,14 +141,12 @@ Examples with *D* = 60 000 ms, taken from the tests:
 | 30 s | 30 s | rejected |
 | 30 s | 30.000001 s | rejected |
 
-The adapter evaluates expiry against the Timestamp and leaves the TTL field unchanged (the timestamp-based method, RECOMMENDED by PBS-ENV-01 Section 12.3). The header CRC32 therefore stays valid, and PBS-DTN-MAP-01 Section 6.4 ("PBS envelopes MUST NOT be modified during DTN encapsulation") holds. PBS-ENV-01 Section 15 also states that gateways "MUST decrement TTL appropriately" and "MUST recalculate CRC32 after TTL modification". The adapter follows Section 12.3 and PBS-DTN-MAP-01 Section 6.4 instead: it decrements no TTL and recalculates no CRC32.
-
-PBS-DTN-MAP-01 Section 6.1 maps TTL to lifetime by unit conversion. PBS-DTN-MAP-02 Section 4 bounds the lifetime by the interval remaining at bundle creation. For an envelope of age 0 with *T* × 1000 ≤ *D*, both rules give *T* × 1000 ms.
+The adapter checks expiry against the unchanged Timestamp and TTL and places the 44 header bytes in the payload block as received. It does not modify TTL, and the originator's header CRC32 stays valid. This meets the expiry-check and header-preservation rules of PBS-ENV-01 Sections 12.3 and 15 and PBS-DTN-MAP-01 Sections 6.4 and 7.3. Section 15 also requires a clock synchronized to Unix epoch time; the worked example uses the clock it is given (`clock_us`).
 
 ### A.6.3 Fields Not Mapped
 
-- **Priority.** PBS-DTN-MAP-01 Section 6.3 maps priority to a DTN class of service. PBS-DTN-MAP-02 Section 5 requires a documented BP QoS mechanism. The worked example implements neither. Priority travels unchanged in the envelope.
-- **Sequence.** PBS-DTN-MAP-01 Section 6.1 maps Sequence to the bundle sequence. The worked example does not; see Section A.6.1.
+- **Priority.** No primary block field carries priority (PBS-DTN-MAP-01 Sections 6.1 and 6.3). The adapter sets no reserved or unassigned bundle processing control flag, bits 7 and 8 included, and `BPv7Primary` rejects any flag that RFC 9171 Section 4.2.3 does not assign (`BPF_ASSIGNED_MASK`, 0x074067). The worked example requests no network treatment and implements no mapping profile (PBS-DTN-MAP-01 Section 6.3; PBS-DTN-MAP-02 Section 5). Priority travels unchanged in the envelope header.
+- **Sequence.** Sequence maps to no primary block field (PBS-DTN-MAP-01 Section 6.1). It travels unchanged in the envelope, and the creation timestamp sequence number is not derived from it (Section A.6.1).
 - **Flags.** The ACK-requested flag sets no bundle processing control flag. PBS-DTN-MAP-02 Section 6 keeps PBS acknowledgement an application semantic.
 
 ---
@@ -167,7 +169,7 @@ The worked example does not implement the inbound direction. PBS-DTN-MAP-01 Sect
 
 1. The bundle protocol agent validates the bundle first. Invalid bundles are discarded before PBS processing (Section 7.1).
 2. The payload block content is the envelope. It is extracted verbatim, and no envelope field is modified (Section 7.2).
-3. Expiry of the bundle lifetime results in envelope discard. The PBS TTL is not incremented or reset (Section 7.3).
+3. Expiry of the bundle lifetime, as the bundle protocol agent determines it, results in envelope discard. The PBS TTL is not modified. PBS expiry is evaluated against the Timestamp, so time spent in the DTN domain counts toward it (Section 7.3).
 
 The receiving PBS node then processes the envelope in the order of PBS-ENV-01 Section 14: magic, CRC32, priority, TTL, payload. No envelope field is derived from bundle EIDs.
 
@@ -187,21 +189,22 @@ The receiving PBS node then processes the envelope in the order of PBS-ENV-01 Se
 | Envelope expired, or less than 1 ms of TTL left | `EnvelopeExpiredError` | Section A.6.2 |
 | Unknown authority context name | `KeyError` | Section A.5.1 |
 | Clock at or before the DTN epoch | `ValueError` | Section A.6.1 |
-| `default_lifetime_ms` ≤ 0 | `ValueError` | Appendix B, Section B.5 |
+| `default_lifetime_ms` outside 1 to 4 294 967 295 000 | `ValueError` | PBS-DTN-MAP-01 Section 6.1.1; Appendix B, Section B.5 |
 | `creation_seq` < 0 | `ValueError` | RFC 9171 Section 4.2.7: the sequence number is a CBOR unsigned integer |
 
-`AuthorityContextMap` raises `ValueError` at construction for an entry that lacks `dest`, `src` or `report_to`, or whose `src` fails Section A.5.3.
+`AuthorityContextMap` raises `ValueError` at construction for an entry that lacks `dest`, `src` or `report_to`, or whose `src` fails Section A.5.3. `build_bpv7_bundle` raises `ValueError` for a `BPv7Primary` whose processing control flags set a flag that RFC 9171 Section 4.2.3 does not assign (Section A.6.3).
 
 ---
 
 ## A.11 Verification
 
-`TESTS/test_pbs_edge_adapter_worked_example_validation.py` covers three of the PBS-DTN-MAP-02 Section 10 conformance items:
+`TESTS/test_pbs_edge_adapter_worked_example_validation.py` covers four of the PBS-DTN-MAP-02 Section 10 conformance items:
 
 | PBS-DTN-MAP-02 Section 10 item | Tests |
 |--------------------------------|-------|
 | Envelope preservation through BP encapsulation | Payload block bytes equal the envelope bytes, including a 256-byte payload of every byte value |
-| Deadline-to-lifetime bounding | TTL 0, TTL below and above the default, partially aged, expired; creation time + lifetime never exceeds the PBS expiry |
+| Deadline-to-lifetime bounding | TTL below and above the default, partially aged, expired; creation time + lifetime never exceeds the PBS expiry |
+| No-expiry lifetime selection when no finite limit applies | TTL 0 gives *D*; *D* = 4 294 967 295 000 ms accepted and 4 294 967 296 000 ms rejected; the TTL 0 lifetime is not less than the lifetime for any TTL from 1 s to 4 294 967 295 s |
 | EID mapping stability | Identical inputs give identical bundle bytes |
 
-The tests also check the bundle and block structure, the primary block CRC32C, the five RFC 7143 Appendix A.4 CRC32C examples, the DTN-millisecond creation time, rejection of corrupted headers and wrong lengths, the source EID rule of Section A.5.3, flag 0x04 for a null source, and rejection of a negative sequence number and a non-positive default lifetime. They do not cover priority preservation, store-and-forward delivery, expiry during disruption, duplicate handling or PBS-SEC-B with BPSec, which need a bundle protocol agent.
+The tests also check the bundle and block structure, the primary block CRC32C, the five RFC 7143 Appendix A.4 CRC32C examples, the DTN-millisecond creation time, rejection of corrupted headers and wrong lengths, the source EID rule of Section A.5.3, flag 0x04 for a null source, flag bits 7 and 8 clear for priorities 0 to 4, rejection of reserved and unassigned flags, different creation timestamps for bundles created in one millisecond, a caller-supplied sequence number used as given, and rejection of a negative sequence number and of a default lifetime outside 1 to 4 294 967 295 000 ms. They do not cover priority preservation, store-and-forward delivery, expiry during disruption, duplicate handling or PBS-SEC-B with BPSec, which need a bundle protocol agent.

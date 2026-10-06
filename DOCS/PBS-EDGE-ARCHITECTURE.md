@@ -60,7 +60,7 @@ flowchart TB
   subgraph ADAPTER["PBS Edge Adapter (MV) components"]
     VAL["Envelope validation<br/>- PBS_LINK.parse_envelope: magic, CRC32, priority, payload length<br/>- input length = 44 + Size<br/>- TTL expiry (PBS-ENV-01 Section 12.2)"]
     AC["Authority Context map<br/>- named entries<br/>- dest, src node ID, report-to EIDs"]
-    ENC["Encapsulation<br/>- creation time in DTN ms<br/>- lifetime bounded by remaining TTL<br/>- primary block CRC32C<br/>- payload block = envelope bytes"]
+    ENC["Encapsulation<br/>- creation time in DTN ms<br/>- sequence number from the adapter counter<br/>- lifetime bounded by remaining TTL<br/>- no reserved processing control flag<br/>- primary block CRC32C<br/>- payload block = envelope bytes"]
     EXT["Extraction<br/>- payload block bytes to envelope, verbatim"]
     IO["Bundle agent interface<br/>- inject bundle<br/>- receive bundle"]
     OBS["Observability<br/>- events and counters"]
@@ -104,8 +104,8 @@ sequenceDiagram
   A->>A: Validate magic, CRC32, priority, length
   A->>AC: Resolve the named authority context
   AC-->>A: dest, src node ID, report-to
-  A->>A: Check TTL, select lifetime (PBS-DTN-MAP-02 Section 4)
-  A->>A: Build primary block (DTN ms creation time, CRC32C)
+  A->>A: Check TTL, select lifetime (PBS-DTN-MAP-01 Sections 6.1, 6.1.1)
+  A->>A: Build primary block (creation timestamp, CRC32C)
   A->>A: Payload block carries the envelope bytes unmodified
   A->>B: Inject bundle
 ```
@@ -113,8 +113,10 @@ sequenceDiagram
 ### Outbound Transformation Summary
 
 - The Authority Context map supplies the destination EID, source node ID and report-to EID. No envelope field enters an EID.
-- The bundle lifetime is the configured default for TTL 0 and min(default, remaining TTL) otherwise.
-- The complete envelope, 44-byte header and payload, becomes the payload block data.
+- The bundle lifetime is the configured no-expiry lifetime for TTL 0 (PBS-DTN-MAP-01 Section 6.1.1; PBS-DTN-MAP-02 Section 4) and min(no-expiry lifetime, remaining TTL) otherwise (PBS-DTN-MAP-01 Section 6.1).
+- The creation timestamp is the DTN time of the clock reading and a sequence number from the adapter's counter or the caller; no envelope field enters it (PBS-DTN-MAP-01 Section 6.1).
+- No primary block field or processing control flag carries priority (PBS-DTN-MAP-01 Section 6.3).
+- The complete envelope, 44-byte header and payload, becomes the payload block data. TTL and the header CRC32 are not modified (PBS-ENV-01 Sections 12.3 and 15).
 
 ---
 

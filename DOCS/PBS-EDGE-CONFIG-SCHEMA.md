@@ -92,11 +92,11 @@ bundle:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `default_lifetime_ms` | integer, ms, > 0 | Bundle lifetime for an envelope with TTL 0, and the upper bound of the lifetime otherwise. The remaining PBS TTL bounds the lifetime further (PBS-DTN-MAP-02 Section 4; [PBS-BPv7-MAPPING-APPENDIX](PBS-BPv7-MAPPING-APPENDIX.md) Section A.6.2). |
+| `default_lifetime_ms` | integer, ms, 1 to 4294967295000, and a value whose expiration time the BP agent computes without overflow | No-expiry lifetime: the bundle lifetime for an envelope with TTL 0, and the upper bound of the lifetime otherwise (PBS-DTN-MAP-01 Section 6.1.1; PBS-DTN-MAP-02 Section 4). The remaining PBS TTL bounds the lifetime further (PBS-DTN-MAP-01 Section 6.1; [PBS-BPv7-MAPPING-APPENDIX](PBS-BPv7-MAPPING-APPENDIX.md) Section A.6.2). |
 
-An envelope with TTL 0 never expires (PBS-ENV-01 Section 12.1). Neither PBS-DTN-MAP-01 nor PBS-DTN-MAP-02 defines the bundle lifetime for TTL 0; the adapter uses `default_lifetime_ms`. When the bundle's age exceeds it, the bundle protocol agent deletes the bundle (RFC 9171 Section 5.5), and the envelope it carries is discarded (PBS-DTN-MAP-01 Section 7.3).
+An envelope with TTL 0 never expires (PBS-ENV-01 Section 12.1). PBS-DTN-MAP-01 Section 6.1.1 sets its bundle lifetime to the gateway's no-expiry lifetime unless a PBS-DTN-MAP-02 Section 4 finite limit applies. The adapter applies no such limit and uses `default_lifetime_ms`. Section 6.1.1 requires the value, and the bundle protocol agent for which it was selected, to be documented, and recommends the largest value that meets its conditions: 4294967295000 ms for an agent that holds DTN time and expiration time in 64-bit integers. When the bundle's age exceeds the lifetime, the bundle protocol agent deletes the bundle (RFC 9171 Section 5.5) and the envelope with it; that deletion is not TTL expiry (PBS-DTN-MAP-01 Sections 6.1.1 and 7.3).
 
-`pbs_to_bpv7_bundle_mv` defaults `default_lifetime_ms` to 60 000 ms; the worked example run passes 300 000 ms.
+`pbs_to_bpv7_bundle_mv` defaults `default_lifetime_ms` to 60 000 ms; the worked example run passes 300 000 ms. Neither value is selected for a particular bundle protocol agent.
 
 ---
 
@@ -119,12 +119,12 @@ A valid configuration has:
 - at least one entry under `authority_contexts`;
 - `dest`, `src` and `report_to` in every entry;
 - as every `src`, a source node ID that Section B.4 accepts;
-- a positive integer `bundle.default_lifetime_ms`.
+- an integer `bundle.default_lifetime_ms` from 1 to 4294967295000 for which the bundle protocol agent computes the expiration time without overflow (PBS-DTN-MAP-01 Section 6.1.1).
 
-The worked example enforces the second and third rules when `AuthorityContextMap` is constructed, and the fourth when it selects a lifetime.
+The worked example enforces the second and third rules when `AuthorityContextMap` is constructed, and the range of the fourth when it selects a lifetime. It connects to no bundle protocol agent and does not check the overflow condition.
 
 ---
 
 ## B.9 Determinism
 
-With identical configuration, the same authority context name always yields the same three EIDs, and the same envelope, sequence number and clock reading always yield the same lifetime and bundle bytes.
+With identical configuration, the same authority context name always yields the same three EIDs, and the same envelope, sequence number and clock reading always yield the same lifetime and bundle bytes. When the caller supplies no sequence number, the adapter's counter gives each bundle created in the same millisecond a different one ([PBS-BPv7-MAPPING-APPENDIX](PBS-BPv7-MAPPING-APPENDIX.md) Section A.6.1).

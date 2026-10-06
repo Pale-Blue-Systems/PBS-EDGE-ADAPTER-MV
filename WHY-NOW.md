@@ -19,7 +19,7 @@ A PBS-ENV-01 v1.3 envelope has a fixed 44-byte header of eleven fields: Magic, P
 
 Three errors at this boundary have defined consequences:
 
-- **Lifetime.** A bundle lifetime set independently of the TTL lets the network deliver an envelope after its PBS expiry. PBS-DTN-MAP-02 Section 4 prohibits this.
+- **Lifetime.** A bundle lifetime set independently of the TTL lets the network deliver an envelope after its PBS expiry. PBS-DTN-MAP-01 Section 6.1 and PBS-DTN-MAP-02 Section 4 prohibit this.
 - **Time base.** RFC 9171 DTN time is in milliseconds (Section 4.2.6). A creation time written in seconds places the bundle's expiration in January 2000, so a bundle protocol agent treats the bundle as expired. The worked example in this repository had this defect; CHANGELOG.md records the fix.
 - **Addressing.** The PBS-ENV-01 v1.3 header names no destination. A destination address, when present, is a PBS-ADDR-01 TLV in the payload (PBS-ADDR-01 Section 3.1). Without an explicit, deterministic map from authority to EIDs, a gateway has no defined destination EID for the bundle (PBS-DTN-MAP-02 Section 3).
 
@@ -36,4 +36,4 @@ Three errors at this boundary have defined consequences:
 ## 4. What This Repository Provides
 
 - The mapping specification, Authority Context definition and configuration schema (`DOCS/`).
-- A worked example that validates the envelope with PBS_LINK, takes the bundle EIDs from the Authority Context map, writes the creation time in DTN milliseconds, bounds the lifetime per PBS-DTN-MAP-02 Section 4, and carries the envelope unmodified, with 55 tests run in CI.
+- A worked example that validates the envelope with PBS_LINK, takes the bundle EIDs from the Authority Context map, writes the creation time in DTN milliseconds, bounds the lifetime per PBS-DTN-MAP-01 Sections 6.1 and 6.1.1 and PBS-DTN-MAP-02 Section 4, and carries the envelope unmodified, with 72 tests run in CI.

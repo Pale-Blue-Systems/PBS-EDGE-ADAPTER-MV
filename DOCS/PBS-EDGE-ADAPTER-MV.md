@@ -16,13 +16,13 @@ This document defines the minimum viable (MV) reference design of the **PBS Edge
 | [PBS-EDGE-CONFIG-SCHEMA](PBS-EDGE-CONFIG-SCHEMA.md) | Configuration inputs |
 | [PBS-EDGE-ARCHITECTURE](PBS-EDGE-ARCHITECTURE.md) | Component placement and message flows |
 
-The governing PBS specifications are PBS-ENV-01 v1.3, PBS-DTN-MAP-01 v1.3 and PBS-DTN-MAP-02 v1.4, published in [PBS-PROTOCOL-OPEN](https://github.com/Pale-Blue-Systems/PBS-PROTOCOL-OPEN/tree/main/PBS-RFC-LIB).
+The governing PBS specifications are PBS-ENV-01 v1.5, PBS-DTN-MAP-01 v1.5 and PBS-DTN-MAP-02 v1.5 (PBS v1.5.0, 2026-10-06), published in [PBS-PROTOCOL-OPEN](https://github.com/Pale-Blue-Systems/PBS-PROTOCOL-OPEN/tree/main/PBS-RFC-LIB).
 
 ---
 
 ## 2. Implementation Status
 
-No PBS edge adapter product is published. `pbs_edge_adapter_worked_example.py` implements the outbound conversion of one envelope into the bytes of one bundle (Section 4, steps 2 to 5), with tests. It does not implement ingress or egress interfaces, injection into or delivery from a bundle protocol agent, the inbound direction, configuration loading, translation of each Source ID to its own EID (PBS-DTN-MAP-01 Section 8), mapping of PBS-ADDR-01 payload addresses to EIDs (PBS-ADDR-01 Section 11), or priority-to-QoS mapping.
+No PBS edge adapter product is published. `pbs_edge_adapter_worked_example.py` implements the outbound conversion of one envelope into the bytes of one bundle (Section 4, steps 2 to 5), with tests. It does not implement ingress or egress interfaces, injection into or delivery from a bundle protocol agent, the inbound direction, configuration loading, translation of each Source ID to its own EID (PBS-DTN-MAP-01 Section 8), mapping of PBS-ADDR-01 payload addresses to EIDs (PBS-ADDR-01 Section 11), or a mapping profile for priority-based network treatment (PBS-DTN-MAP-01 Section 6.3; PBS-DTN-MAP-02 Section 5). It is not a bundle protocol agent: it assigns the creation timestamp itself, which PBS-DTN-MAP-01 Section 6.1 assigns to the gateway's agent ([PBS-BPv7-MAPPING-APPENDIX](PBS-BPv7-MAPPING-APPENDIX.md) Section A.6.1).
 
 ---
 
@@ -39,7 +39,7 @@ Outbound (PBS to BPv7), per envelope:
 1. Accept the envelope from the local ingress interface.
 2. Validate it: magic, header CRC32, priority and payload length (PBS-ENV-01 Section 14, via `PBS_LINK.parse_envelope`), input length equal to 44 + `Size`, and TTL (PBS-ENV-01 Section 12.2).
 3. Resolve the named Authority Context to a destination EID, source node ID and report-to EID.
-4. Build the primary block: creation time in DTN milliseconds, lifetime bounded by the remaining TTL (PBS-DTN-MAP-02 Section 4), CRC32C.
+4. Build the primary block: creation timestamp of DTN milliseconds and a sequence number from the adapter's counter (RFC 9171 Section 4.2.7); lifetime bounded by the remaining TTL, or for TTL 0 the configured no-expiry lifetime (PBS-DTN-MAP-01 Sections 6.1 and 6.1.1; PBS-DTN-MAP-02 Section 4); no reserved or unassigned processing control flag (PBS-DTN-MAP-01 Section 6.3); CRC32C.
 5. Place the complete envelope, unmodified, in the payload block (PBS-DTN-MAP-01 Section 6.2).
 6. Pass the bundle to the bundle protocol agent.
 
@@ -65,7 +65,7 @@ The adapter accepts PBS-ENV-01 v1.3 envelopes: a fixed 44-byte big-endian header
 
 ### 6.2 Envelope Opacity
 
-The adapter reads the Magic, Priority, Timestamp, Size, TTL and CRC32 header fields for validation and lifetime selection. It does not read the payload. It modifies no envelope byte: the TTL field is not decremented, so the header CRC32 remains valid end to end (PBS-ENV-01 Section 12.3 timestamp-based method; PBS-DTN-MAP-01 Section 6.4).
+The adapter reads the Magic, Priority, Timestamp, Size, TTL and CRC32 header fields for validation and lifetime selection. It does not read the payload. It modifies no envelope byte: TTL is not modified and the originator's header CRC32 remains valid end to end (PBS-ENV-01 Sections 12.3 and 15; PBS-DTN-MAP-01 Sections 6.4 and 7.3). It does not read Sequence, and neither Sequence nor Priority enters a primary block field (PBS-DTN-MAP-01 Section 6.1).
 
 ---
 
@@ -73,7 +73,7 @@ The adapter reads the Magic, Priority, Timestamp, Size, TTL and CRC32 header fie
 
 Each bundle is a CBOR indefinite-length array of two blocks (RFC 9171 Section 4.1):
 
-- **Primary block** (Section 4.3.1): version 7; processing control flags 0, or 0x04 (bundle must not be fragmented) when the source is the null endpoint (Section 4.2.3); CRC type 2 (CRC32C); destination EID, source node ID and report-to EID from the Authority Context; creation timestamp of DTN time in milliseconds and a sequence number; lifetime in milliseconds, equal to the configured default for TTL 0 and to min(default, remaining TTL) otherwise; CRC32C.
+- **Primary block** (Section 4.3.1): version 7; processing control flags 0, or 0x04 (bundle must not be fragmented) when the source is the null endpoint (Section 4.2.3), and no reserved or unassigned flag (PBS-DTN-MAP-01 Section 6.3); CRC type 2 (CRC32C); destination EID, source node ID and report-to EID from the Authority Context; creation timestamp of DTN time in milliseconds and a sequence number from the adapter's counter or the caller (Section 4.2.7); lifetime in milliseconds, equal to the configured no-expiry lifetime for TTL 0 (PBS-DTN-MAP-01 Section 6.1.1) and to min(no-expiry lifetime, remaining TTL) otherwise (PBS-DTN-MAP-01 Section 6.1); CRC32C.
 - **Payload block** (Section 4.3.2): type 1, number 1, flags 0, CRC type 0, the envelope bytes.
 
 The adapter adds no extension blocks.
@@ -82,7 +82,7 @@ The adapter adds no extension blocks.
 
 ## 8. Deterministic Behavior
 
-Identical envelope bytes, Authority Context entry, configured default lifetime, sequence number and clock reading produce identical bundle bytes; the tests check this. The adapter performs no policy arbitration, trust scoring or routing.
+Identical envelope bytes, Authority Context entry, configured default lifetime, sequence number and clock reading produce identical bundle bytes; the tests check this. When the caller supplies no sequence number, the adapter's counter gives each bundle created in the same millisecond a different one. The adapter performs no policy arbitration, trust scoring or routing.
 
 ---
 

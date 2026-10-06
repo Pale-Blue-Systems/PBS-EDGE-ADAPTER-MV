@@ -439,7 +439,7 @@ def bundle_lifetime_ms(envelope: PBSEnvelope, now_us: int, default_lifetime_ms: 
 
     TTL 0: the envelope never expires (PBS-ENV-01 Section 12.1). This
     example reads no Service Intent frame and no mission expiry policy, so
-    no PBS-DTN-MAP-02 Section 4 finite limit applies; return
+    it applies no PBS-DTN-MAP-02 Section 4 finite limit; return
     default_lifetime_ms (PBS-DTN-MAP-01 Section 6.1.1). When the bundle's
     age exceeds it, the BP agent deletes the bundle (RFC 9171 Section 5.5)
     and the envelope with it. That deletion is not TTL expiry
