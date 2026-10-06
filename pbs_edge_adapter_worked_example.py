@@ -210,6 +210,14 @@ class AuthorityContextMap:
 # report request flag.
 BPF_MUST_NOT_FRAGMENT = 0x000004
 
+# Bundle processing control flags RFC 9171 Section 4.2.3 assigns: bits 0-2,
+# 5, 6, 14 and 16-18. Bits 3-4, 7-13, 15 and 19-20 are reserved and bits
+# 21-63 unassigned. PBS-DTN-MAP-01 Section 6.3 forbids conveying PBS
+# priority in reserved or unassigned flags, including bits 7 and 8
+# (0x000180), which carry the class of service in Bundle Protocol version 6
+# (RFC 5050 Section 4.2). BPv7Primary rejects any flag outside this mask.
+BPF_ASSIGNED_MASK = 0x074067
+
 
 @dataclass(frozen=True)
 class BPv7Primary:
@@ -229,6 +237,12 @@ class BPv7Primary:
     crc_type: int = 2              # 2 = CRC32C (RFC 9171 Section 4.2.1)
 
     def to_cbor_with_crc_placeholder(self) -> list[Any]:
+        if self.bundle_proc_flags & ~BPF_ASSIGNED_MASK:
+            raise ValueError(
+                f"Bundle processing control flags 0x{self.bundle_proc_flags:06x} set a reserved "
+                "or unassigned flag (RFC 9171 Section 4.2.3); PBS priority is not conveyed "
+                "in them (PBS-DTN-MAP-01 Section 6.3)"
+            )
         if self.crc_type == 0:
             raise ValueError(
                 "Primary block CRC type must be non-zero unless a BPSec BIB targets "
@@ -502,6 +516,8 @@ def pbs_to_bpv7_bundle_mv(
 
     The bundle processing control flags are 0, or 0x04 ("bundle must not be
     fragmented") when the source is the null endpoint (RFC 9171 Section 4.2.3).
+    No primary block field or flag carries the envelope Priority
+    (PBS-DTN-MAP-01 Sections 6.1 and 6.3); it travels in the envelope.
 
     Raises PBS_LINK.PBSValidationError or a subclass (PBSMagicError,
     PBSCRCError, PBSPriorityError) for an invalid or truncated envelope,

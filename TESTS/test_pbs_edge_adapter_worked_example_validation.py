@@ -54,10 +54,12 @@ AC_MAP = AuthorityContextMap(
 )
 
 
-def make_envelope(ttl: int, payload: bytes = b"VOLTAGE=120.0") -> bytes:
+def make_envelope(
+    ttl: int, payload: bytes = b"VOLTAGE=120.0", priority: Priority = Priority.NORMAL
+) -> bytes:
     """PBS-ENV-01 v1.3 envelope from PBS_LINK with Timestamp = T0_US."""
     link = PBSLink(device_id="TEST-ROVER", clock_source=lambda: T0_S)
-    return link.send(Priority.NORMAL, payload, ttl=ttl)
+    return link.send(priority, payload, ttl=ttl)
 
 
 def encapsulate(
@@ -188,6 +190,35 @@ def test_converted_bundle_primary_block_and_crc():
     dest, src, rpt = AC_MAP.resolve("pbsf.luna.ops")
     assert primary_block[:6] == [7, 0, 2, dest, src, rpt]
     assert bytes(primary_block[8]) == _recompute_primary_crc32c(primary_block)
+
+
+@pytest.mark.parametrize("priority", list(Priority))
+def test_priority_sets_no_processing_control_flag(priority):
+    # PBS-DTN-MAP-01 Section 6.3: no reserved or unassigned flag, including
+    # bits 7 and 8 (0x180), conveys PBS priority. Priority stays in the
+    # envelope header (offset 0x01) inside the payload block.
+    envelope = make_envelope(ttl=30, priority=priority)
+    bundle = cbor2.loads(encapsulate(envelope, now_us=T0_US))
+    assert bundle[0][1] & 0x180 == 0
+    assert bundle[-1][4][1] == priority
+
+
+@pytest.mark.parametrize("flags", [0x000080, 0x000100, 0x000180, 0x000008, 0x200000])
+def test_reserved_or_unassigned_processing_control_flag_is_rejected(flags):
+    # RFC 9171 Section 4.2.3: bits 3-4, 7-13, 15 and 19-20 are reserved and
+    # bits 21-63 unassigned.
+    dest, src, rpt = AC_MAP.resolve("pbsf.luna.ops")
+    primary = BPv7Primary(
+        destination=dest,
+        source=src,
+        report_to=rpt,
+        creation_time_dtn=123456,
+        creation_seq=0,
+        lifetime_ms=1000,
+        bundle_proc_flags=flags,
+    )
+    with pytest.raises(ValueError):
+        build_bpv7_bundle(primary, BPv7PayloadBlock(payload=make_envelope(ttl=30)))
 
 
 # -----------------------------
