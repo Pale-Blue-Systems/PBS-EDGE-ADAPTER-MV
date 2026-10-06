@@ -36,4 +36,4 @@ Three errors at this boundary have defined consequences:
 ## 4. What This Repository Provides
 
 - The mapping specification, Authority Context definition and configuration schema (`DOCS/`).
-- A worked example that validates the envelope with PBS_LINK, takes the bundle EIDs from the Authority Context map, writes the creation time in DTN milliseconds, bounds the lifetime per PBS-DTN-MAP-02 Section 4, and carries the envelope unmodified, with 53 tests run in CI.
+- A worked example that validates the envelope with PBS_LINK, takes the bundle EIDs from the Authority Context map, writes the creation time in DTN milliseconds, bounds the lifetime per PBS-DTN-MAP-02 Section 4, and carries the envelope unmodified, with 55 tests run in CI.
