@@ -8,181 +8,77 @@
 
 ## 1. Purpose
 
-This document defines the **Authority Context** used by the Pale Blue Systems (PBS) Edge Adapter.
-
-The Authority Context establishes the **administrative and routing namespace** within which PBS envelopes are interpreted and mapped into Bundle Protocol Version 7 (BPv7) transport environments.
-
-This specification provides a deterministic and inspectable mechanism for namespace separation across shared transport infrastructure.
+This document defines the **Authority Context** of the PBS Edge Adapter: the configuration entry that sets the BPv7 addressing of an encapsulated PBS envelope. `AuthorityContextMap` in `pbs_edge_adapter_worked_example.py` implements it.
 
 ---
 
-## 2. Conceptual Overview
+## 2. Definition
 
-An **Authority Context** represents a single, coherent authority domain under which:
+An Authority Context is a named entry in the adapter configuration. It holds three BPv7 endpoint identifiers (EIDs):
 
-- PBS identifiers are interpreted
-- Routing namespaces are resolved
-- BPv7 Endpoint Identifiers (EIDs) are constructed
+| Field | Content | RFC 9171 |
+|-------|---------|----------|
+| `dest` | Destination EID of every bundle built under this context | 4.3.1 |
+| `src` | Source node ID: a node ID of the adapter's BP node, or `dtn:none` | 4.2.5.2, 4.3.1 |
+| `report_to` | Report-to EID for bundle status reports | 4.3.1 |
 
-Each PBS Edge Adapter instance operates under **exactly one active Authority Context** at any given time.
-
----
-
-## 3. Motivation
-
-Distributed communication environments frequently involve:
-
-- Multiple organizations
-- Multiple missions or programs
-- Shared physical or logical transport infrastructure
-
-The Authority Context provides a means to ensure that PBS envelopes originating from different authorities remain **logically distinct**, even when they traverse common DTN links.
+The name is a string unique within the adapter configuration, for example `pbsf.luna.ops`.
 
 ---
 
-## 4. Authority Context Definition
+## 3. Why Configuration Supplies the Addressing
 
-An Authority Context consists of the following components:
+- The PBS-ENV-01 v1.3 header carries a 16-byte Source ID. It has no destination, authority or scope field.
+- A BPv7 primary block requires a destination EID, a source node ID and a report-to EID (RFC 9171 Section 4.3.1).
+- PBS-DTN-MAP-01 Sections 6.1 and 8 configure the destination EID at the gateway, not in the envelope.
+- PBS-DTN-MAP-02 Section 3 requires the mapping to BP EIDs to be deterministic, stable for the duration the mission transaction requires, and to preserve authority scope in the mapping registry or binding context.
 
-| Component | Description |
-|---------|-------------|
-| Authority Identifier | A unique identifier representing the administrative authority |
-| Namespace Root | The root namespace used when constructing BPv7 EIDs |
-| Routing Scope Rules | Deterministic rules for interpreting PBS scope identifiers |
-| Adapter Configuration Binding | Static binding between the adapter instance and the authority |
-
-All components are defined through explicit configuration.
+The Authority Context map is that binding context.
 
 ---
 
-## 5. Authority Identifier
+## 4. Relationship to PBS-AUTH-01
 
-The **Authority Identifier** uniquely names the authority domain.
-
-Characteristics:
-
-- Stable across time
-- Unique within the deployment environment
-- Opaque to the adapter beyond equality comparison
-
-The Authority Identifier is not transmitted within the PBS payload.
+PBS-AUTH-01 v1.4 (Authority and Scope Context) carries an authority identifier, role and policy epoch as PBS-MUX frame type `0x08` inside the envelope payload. PBS-SEC-B authenticates it when used for protected operations. The edge adapter does not read the envelope payload. It does not parse, validate or act on PBS-AUTH-01 frames, and it performs no command authorization (PBS-AUTH-REQ-003). These remain functions of the receiving PBS node.
 
 ---
 
-## 6. Namespace Root
+## 5. Selection
 
-The **Namespace Root** defines the top-level namespace used when constructing BPv7 Endpoint Identifiers.
-
-Examples include, but are not limited to:
-
-- A domain-style namespace
-- A numeric namespace
-- A structured hierarchical identifier
-
-The Namespace Root is combined with PBS routing identifiers to form complete BPv7 EIDs.
+The adapter configuration holds a map of Authority Contexts. Each envelope is encapsulated under exactly one context, named by the caller (the `authority_context` argument of `pbs_to_bpv7_bundle_mv`). The envelope does not name the context. This document does not specify how a deployment chooses the name for a given envelope.
 
 ---
 
-## 7. Binding and Configuration
+## 6. Validation
 
-### 7.1 Adapter Binding
+`AuthorityContextMap` validates the map when it is constructed:
 
-Each PBS Edge Adapter instance is bound to one Authority Context via configuration at initialization time.
+- Each entry has `dest`, `src` and `report_to`. A missing field raises `ValueError`.
+- Each `src` is a node ID or `dtn:none`. A dtn-scheme EID qualifies only with an empty demux, for example `dtn://edge-17.pbsf.example/` (RFC 9171 Section 4.2.5.1.1). An ipn-scheme EID qualifies only with service number 0, for example `ipn:4017.0` (Section 4.2.5.1.2). Any other `src` raises `ValueError`.
 
-The binding is static for the lifetime of the adapter instance.
-
----
-
-### 7.2 Configuration Inputs
-
-Authority Context configuration includes:
-
-- Authority Identifier
-- Namespace Root
-- EID construction rules
-- Default routing parameters
-
-Configuration is explicit and local to the adapter instance.
+Resolving a name absent from the map raises `KeyError`.
 
 ---
 
-## 8. Use in PBS → BPv7 Mapping
+## 7. Determinism and Separation
 
-When processing a PBS envelope, the adapter uses the active Authority Context to:
-
-1. Interpret PBS source and destination identifiers
-2. Resolve scope identifiers within the authority namespace
-3. Construct BPv7 Source and Destination EIDs
-4. Ensure deterministic namespace separation
-
-No cross-authority inference is performed.
+A given context name always resolves to the same three EIDs. Envelopes encapsulated under different contexts carry the EIDs of their own contexts. Separation between authorities in the DTN follows from the EID namespaces assigned to each context and from bundle protocol agent policy. The adapter performs no cross-context inference, arbitration or routing.
 
 ---
 
-## 9. Use in BPv7 → PBS Mapping
+## 8. Inbound Direction
 
-When receiving a BPv7 bundle, the adapter:
-
-1. Parses the Source and Destination EIDs
-2. Interprets them relative to the active Authority Context
-3. Reconstructs PBS source and destination identifiers
-4. Emits a PBS envelope within the same authority domain
-
-Bundles whose EIDs do not align with the active Authority Context are not reconstructed.
+The worked example implements no inbound processing. Under PBS-DTN-MAP-01 Section 7.2, the receiving gateway extracts the envelope from the payload block verbatim. No envelope field is derived from bundle EIDs.
 
 ---
 
-## 10. Deterministic Behavior
+## 9. Example
 
-Authority Context handling is deterministic:
+The worked example configures two contexts:
 
-- Identical inputs and configuration produce identical results
-- No dynamic authority selection is performed
-- No runtime arbitration between authorities occurs
+| Name | `dest` | `src` | `report_to` |
+|------|--------|-------|-------------|
+| `pbsf.luna.ops` | `dtn://pbsf.example/luna/ops` | `dtn://edge-17.pbsf.example/` | `dtn://pbsf.example/ops/reports` |
+| `pbsf.mars.science` | `ipn:4001.10` | `ipn:4017.0` | `ipn:4001.11` |
 
-Determinism ensures predictable behavior and simplifies interoperability testing.
-
----
-
-## 11. Authority Isolation
-
-Authority Contexts provide **logical isolation** through:
-
-- Namespace separation
-- Deterministic routing resolution
-- Explicit configuration boundaries
-
-Isolation is achieved without requiring separate transport infrastructure.
-
----
-
-## 12. Applicability
-
-The Authority Context model applies to environments including:
-
-- Multi-mission space systems
-- Joint civil, commercial, and scientific networks
-- Federated DTN deployments
-- Intermittently connected and delay-tolerant networks
-
----
-
-## 13. Extensibility
-
-This specification defines the **minimum viable Authority Context**.
-
-Future extensions may introduce:
-
-- Multi-context adapters
-- Dynamic context selection
-- Federation-aware context resolution
-
-Such extensions do not alter the correctness of the model defined herein.
-
----
-
-## 14. Summary
-
-The Authority Context establishes a clear and deterministic foundation for authority-aware routing at the network edge.
-
-By explicitly binding PBS Edge Adapters to a single authority namespace, the model enables safe coexistence of multiple authorities over shared BPv7 transport environments.
+The `pbsf.example` names and ipn node numbers are illustrative.
