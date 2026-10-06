@@ -13,14 +13,29 @@ documentation, specifications, and illustrative artifacts rather than production
 - README describing scope, intent, and alignment with DTN and BPv7 standards.
 - PBS Edge Adapter reference specification (`PBS-EDGE-ADAPTER-MV`).
 - PBS ↔ BPv7 Mapping Appendix defining deterministic encapsulation rules.
-- Authority Context specification defining namespace and routing isolation.
+- Authority Context specification: the configuration entry that supplies the bundle EIDs.
 - Architecture and message flow documentation with reference diagrams.
 - Configuration Schema Appendix defining authoritative adapter configuration inputs.
 - Worked example reference code demonstrating PBS envelope encapsulation into a BPv7 bundle.
 - Validation test verifying BPv7 bundle structure, Primary Block CRC32C correctness, and payload integrity.
 - Apache License 2.0 (`LICENSE`).
+- Envelope validation in the worked example: `PBS_LINK.parse_envelope` checks magic, header CRC32, priority and payload length (PBS-ENV-01 Sections 13 and 14); input longer than 44 + `Size` bytes raises `EnvelopeLengthError`; an expired envelope, or one with less than 1 ms of TTL left, raises `EnvelopeExpiredError` (PBS-ENV-01 Section 12.2).
+- Tests, 40 in total: creation time in DTN milliseconds with an injected clock (exact value); lifetime for TTL 0, TTL below and above the default, a partially aged envelope and an expired envelope; creation time + lifetime never past the PBS expiry; corrupted header CRC32; trailing and missing bytes; payload block bytes equal to the envelope bytes; identical inputs giving identical bundles; the RFC 7143 Appendix A.4 CRC32C examples; the source node ID rule.
+- `pytest.ini` (`testpaths = TESTS`, `pythonpath = .`).
+- CI workflow `.github/workflows/tests.yml`: on push and pull request, ubuntu-latest, Python 3.10, 3.11 and 3.12; installs pytest, cbor2 and PBS_LINK, runs `pytest -q` and the worked example. README badge.
+
+### Changed
+- Bundle lifetime follows PBS-DTN-MAP-02 Section 4: min(configured default, TTL × 1000 − envelope age in ms, age rounded up); TTL 0 uses the configured default. It was the configured value regardless of the TTL. `pbs_to_bpv7_bundle_mv` takes `default_lifetime_ms` (was `lifetime_ms`) and `clock_us`, a callable returning Unix time in microseconds, read once for both the creation time and the envelope age.
+- `AuthorityContextMap` rejects an entry that lacks `dest`, `src` or `report_to`, or whose `src` is not a node ID.
+- The worked example imports PBS_LINK directly. The fallback that printed a warning and continued without it, and the `sys.path` entries pointing at a sibling PBS_LINK checkout, are removed. Console messages name PBS_LINK and report the creation time as a UTC instant and the lifetime.
+- `DOCS/` describe the PBS-ENV-01 v1.3 header and the code: the Authority Context is a map of named entries selected per envelope; it is distinct from the PBS-AUTH-01 payload frame; the adapter performs no routing (PBS-DTN-MAP-02 Section 8); the configuration schema uses `default_lifetime_ms` and reserves the interface keys; the architecture diagrams mark the components the worked example does not implement.
+- README states the clauses the worked example implements and what the tests verify. WHY-NOW cites LNIS V005 and NASA *2026 Civil Space Shortfalls* need statement 15.01 in place of general statements about future operations.
 
 ### Fixed
+- Bundle creation time was written in seconds since 2000-01-01, and the code comment said RFC 9171 DTN time is seconds. RFC 9171 Section 4.2.6 defines DTN time in milliseconds. Read as milliseconds, a 2026-10-06 creation time of 844 575 531 falls on 2000-01-10, so creation time + lifetime had passed and a bundle protocol agent treats the bundle as expired. Creation time is now Unix time in ms − 946 684 800 000.
+- `pytest -q` from a clean checkout failed at collection with `ModuleNotFoundError: No module named 'pbs_edge_adapter_worked_example'`; `pytest.ini` puts the repository root on the import path.
+- The example source EIDs `dtn://pbsf.example/edge/node-17` and `ipn:4001.99` cannot serve as node IDs (RFC 9171 Sections 4.2.5.1.1 and 4.2.5.1.2). The examples use `dtn://edge-17.pbsf.example/` and `ipn:4017.0`.
+- `DOCS/PBS-BPv7-MAPPING-APPENDIX.md` Section A.3 listed envelope elements (PBS Version, Destination Identifier, Scope Identifier, Message Identifier) that the 44-byte header does not contain, and Section A.5 derived EIDs from them. Section A.3 lists the header fields; Section A.5 takes every EID from the Authority Context map; Section A.6.2 states the lifetime rule; Section A.7 carries the whole envelope; Section A.9 extracts the envelope verbatim (PBS-DTN-MAP-01 Section 7.2) instead of reconstructing it.
 - Worked example and validation test import `PBS_LINK`, the package name PBS_LINK actually installs; `pbs_link` failed to import on case-sensitive systems, so `pytest -q` stopped at collection.
 - README repository structure lists the directories that exist.
 - Instructions for running validation tests.
