@@ -44,7 +44,7 @@ The adapter accepts a PBS-ENV-01 v1.3 envelope: a fixed 44-byte big-endian heade
 
 The header contains no destination, scope, authority or message identifier field, and no version field other than Magic. No header field contributes to a bundle EID. Every header byte and the payload travel unmodified in the payload block (Section A.7).
 
-`PBS_LINK.parse_envelope` (PBS_LINK 0.1.2) checks the 44-byte minimum length, magic, CRC32, priority and payload length, in that order. The adapter then checks the input length and the TTL. The payload-length check therefore precedes the TTL check; PBS-ENV-01 Section 14 lists TTL as step 4 and payload extraction as step 5. Either failure discards the envelope and produces no bundle; only the exception differs. Section A.10 lists the rejections.
+`PBS_LINK.parse_envelope` (PBS_LINK 0.1.3) checks the 44-byte minimum length, magic, CRC32, priority and payload length, in that order. The adapter then checks the input length and the TTL. The payload-length check therefore precedes the TTL check; PBS-ENV-01 Section 14 lists TTL as step 4 and payload extraction as step 5. Either failure discards the envelope and produces no bundle; only the exception differs. Section A.10 lists the rejections.
 
 ---
 

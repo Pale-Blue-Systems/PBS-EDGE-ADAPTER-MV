@@ -56,7 +56,7 @@ pytest -q
 python pbs_edge_adapter_worked_example.py
 ```
 
-[PBS_LINK](https://github.com/Pale-Blue-Systems/PBS_LINK) is the PBS reference SDK (pip distribution `pbs-link` 0.1.2; import package `PBS_LINK`). It implements PBS-ENV-01 v1.3, including the header CRC32 over bytes 0x00–0x2B with the CRC32 field set to zero.
+[PBS_LINK](https://github.com/Pale-Blue-Systems/PBS_LINK) is the PBS reference SDK (pip distribution `pbs-link` 0.1.3; import package `PBS_LINK`). It implements PBS-ENV-01 v1.3, including the header CRC32 over bytes 0x00–0x2B with the CRC32 field set to zero.
 
 The worked example prints the envelope header, the bundle in hex, the decoded primary block, the creation time as a UTC instant, and the lifetime. With a 120 s TTL and a 300 000 ms configured default, the lifetime is 120 000 ms minus the envelope's age at bundle creation, with the age rounded up to whole milliseconds.
 
