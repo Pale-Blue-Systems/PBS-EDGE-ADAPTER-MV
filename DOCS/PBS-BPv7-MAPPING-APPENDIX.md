@@ -115,12 +115,14 @@ PBS-DTN-MAP-02 Section 4 requires a lifetime that cannot extend the PBS message 
 
 | Condition | Result | Rule |
 |-----------|--------|------|
-| *T* = 0 | lifetime = *D* | PBS-ENV-01 Section 12.1: TTL 0 never expires |
+| *T* = 0 | lifetime = *D* | Not defined by PBS-DTN-MAP-01 or PBS-DTN-MAP-02; see "TTL 0" below |
 | *T* > 0 and *age* > *T* × 10⁶ µs | rejected, `EnvelopeExpiredError` | PBS-ENV-01 Sections 12.1, 12.2 and 15: gateways discard expired envelopes |
 | *T* > 0, *remaining* ≤ 0 | rejected, `EnvelopeExpiredError` | Less than 1 ms remains; no positive lifetime fits |
 | *T* > 0, otherwise | lifetime = min(*D*, *remaining*) | PBS-DTN-MAP-02 Section 4 |
 
 *remaining* = ⌊(*T* × 10⁶ − *age*) / 1000⌋ ms, which equals *T* × 1000 minus the age in milliseconds rounded up. Because creation time and age come from one clock reading, creation time + lifetime never exceeds Timestamp + TTL on the DTN time scale, and the lifetime never exceeds *T* × 1000 ms.
+
+**TTL 0.** An envelope with TTL 0 never expires (PBS-ENV-01 Section 12.1). PBS-DTN-MAP-01 Section 6.1 converts TTL seconds to lifetime and states no TTL 0 case. PBS-DTN-MAP-02 Section 4 requires a computed bound only for finite deadlines or freshness limits. Neither specification defines the bundle lifetime for TTL 0. The adapter uses *D*. When the bundle's age exceeds *D*, the bundle protocol agent deletes the bundle (RFC 9171 Section 5.5), and the envelope it carries is discarded (PBS-DTN-MAP-01 Section 7.3). A TTL 0 envelope therefore reaches its destination only if its bundle is delivered before the bundle's age exceeds *D*.
 
 Examples with *D* = 60 000 ms, taken from the tests:
 

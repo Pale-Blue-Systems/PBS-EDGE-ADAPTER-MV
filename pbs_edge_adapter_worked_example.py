@@ -358,8 +358,11 @@ def bundle_lifetime_ms(envelope: PBSEnvelope, now_us: int, default_lifetime_ms: 
     """
     Select the bundle lifetime per PBS-DTN-MAP-02 Section 4.
 
-    TTL 0: the envelope never expires (PBS-ENV-01 Section 12.1); return
-    default_lifetime_ms.
+    TTL 0: the envelope never expires (PBS-ENV-01 Section 12.1). Neither
+    PBS-DTN-MAP-01 nor PBS-DTN-MAP-02 defines a bundle lifetime for TTL 0;
+    return default_lifetime_ms. When the bundle's age exceeds it, the BP
+    agent deletes the bundle (RFC 9171 Section 5.5) and the envelope is
+    discarded with it (PBS-DTN-MAP-01 Section 7.3).
 
     TTL > 0: the envelope expires at Timestamp + TTL (PBS-ENV-01 Section
     12.2). Return min(default_lifetime_ms, remaining_ms), where

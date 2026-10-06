@@ -19,7 +19,7 @@ No PBS edge adapter product is published. The worked example builds bundle bytes
 | Reject an expired envelope | PBS-ENV-01 Sections 12.1, 12.2, 15 |
 | Map one envelope to exactly one bundle | PBS-DTN-MAP-01 Section 5.1; PBS-DTN-MAP-02 Section 2 |
 | Place the entire envelope (header and payload) in a single payload block, unmodified, header CRC32 preserved | PBS-DTN-MAP-01 Sections 6.2, 6.4 |
-| Set the lifetime to the configured default for TTL 0, otherwise min(default, TTL × 1000 − age in ms) | PBS-DTN-MAP-02 Section 4 |
+| Set the lifetime to min(default, TTL × 1000 − age in ms); for TTL 0, which neither PBS-DTN-MAP-01 nor PBS-DTN-MAP-02 covers, use the configured default | PBS-DTN-MAP-02 Section 4; [Appendix A, Section A.6.2](DOCS/PBS-BPv7-MAPPING-APPENDIX.md) |
 | Take the destination EID, source node ID and report-to EID from the Authority Context map; accept as source the null endpoint, a dtn EID with an empty demux, or an ipn EID | PBS-DTN-MAP-01 Section 6.1 (Destination EID row) and Section 8 (destination EIDs configured at the gateway); RFC 9171 Section 4.2.5.1.1; RFC 9758 Sections 3.4.1, 5.3 |
 | Write the creation time as DTN time in milliseconds since 2000-01-01T00:00:00Z | RFC 9171 Sections 4.2.6, 4.2.7 |
 | Set processing control flags 0, or 0x04 (bundle must not be fragmented) when the source is the null endpoint | RFC 9171 Section 4.2.3 |

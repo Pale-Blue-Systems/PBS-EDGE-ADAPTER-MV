@@ -94,6 +94,8 @@ bundle:
 |-------|------|-------------|
 | `default_lifetime_ms` | integer, ms, > 0 | Bundle lifetime for an envelope with TTL 0, and the upper bound of the lifetime otherwise. The remaining PBS TTL bounds the lifetime further (PBS-DTN-MAP-02 Section 4; [PBS-BPv7-MAPPING-APPENDIX](PBS-BPv7-MAPPING-APPENDIX.md) Section A.6.2). |
 
+An envelope with TTL 0 never expires (PBS-ENV-01 Section 12.1). Neither PBS-DTN-MAP-01 nor PBS-DTN-MAP-02 defines the bundle lifetime for TTL 0; the adapter uses `default_lifetime_ms`. When the bundle's age exceeds it, the bundle protocol agent deletes the bundle (RFC 9171 Section 5.5), and the envelope it carries is discarded (PBS-DTN-MAP-01 Section 7.3).
+
 `pbs_to_bpv7_bundle_mv` defaults `default_lifetime_ms` to 60 000 ms; the worked example run passes 300 000 ms.
 
 ---
