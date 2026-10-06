@@ -19,7 +19,7 @@ An Authority Context is a named entry in the adapter configuration. It holds thr
 | Field | Content | RFC 9171 |
 |-------|---------|----------|
 | `dest` | Destination EID of every bundle built under this context | 4.3.1 |
-| `src` | Source node ID: a node ID of the adapter's BP node, or `dtn:none` | 4.2.5.2, 4.3.1 |
+| `src` | Source node ID: the EID of a singleton endpoint of the adapter's BP node, or the null endpoint (`dtn:none`, `ipn:0.0`) | 4.2.5.1.1, 4.2.5.1.2, 4.2.5.2, 4.3.1 |
 | `report_to` | Report-to EID for bundle status reports | 4.3.1 |
 
 The name is a string unique within the adapter configuration, for example `pbsf.luna.ops`.
@@ -28,7 +28,7 @@ The name is a string unique within the adapter configuration, for example `pbsf.
 
 ## 3. Why Configuration Supplies the Addressing
 
-- The PBS-ENV-01 v1.3 header carries a 16-byte Source ID. It has no destination, authority or scope field.
+- The PBS-ENV-01 v1.3 header carries a 16-byte Source ID. It has no destination, authority or scope field. A destination address, when present, is a PBS-ADDR-01 TLV in the payload (PBS-ADDR-01 Section 3.1). The adapter does not read PBS-ADDR-01 address TLVs and does not map them to EIDs (PBS-ADDR-01 Section 11; PBS-DTN-MAP-02 Section 3).
 - A BPv7 primary block requires a destination EID, a source node ID and a report-to EID (RFC 9171 Section 4.3.1).
 - PBS-DTN-MAP-01 Sections 6.1 and 8 configure the destination EID at the gateway, not in the envelope.
 - PBS-DTN-MAP-02 Section 3 requires the mapping to BP EIDs to be deterministic, stable for the duration the mission transaction requires, and to preserve authority scope in the mapping registry or binding context.
@@ -54,7 +54,7 @@ The adapter configuration holds a map of Authority Contexts. Each envelope is en
 `AuthorityContextMap` validates the map when it is constructed:
 
 - Each entry has `dest`, `src` and `report_to`. A missing field raises `ValueError`.
-- Each `src` is a node ID or `dtn:none`. A dtn-scheme EID qualifies only with an empty demux, for example `dtn://edge-17.pbsf.example/` (RFC 9171 Section 4.2.5.1.1). An ipn-scheme EID qualifies only with service number 0, for example `ipn:4017.0` (Section 4.2.5.1.2). Any other `src` raises `ValueError`.
+- Each `src` is a node ID: the EID of a singleton endpoint of the adapter's BP node (RFC 9171 Section 4.2.5.2; RFC 9758 Section 5.3), or the null endpoint `dtn:none` or `ipn:0.0`. A dtn EID whose demux begins with `~` identifies a non-singleton endpoint and is rejected. `ipn:0.N` with N ≠ 0 is rejected (RFC 9758 Section 3.4.1). Any rejected `src` raises `ValueError`. [PBS-BPv7-MAPPING-APPENDIX](PBS-BPv7-MAPPING-APPENDIX.md) Section A.5.3 states the rule and the RFC 9171 text it resolves.
 
 Resolving a name absent from the map raises `KeyError`.
 

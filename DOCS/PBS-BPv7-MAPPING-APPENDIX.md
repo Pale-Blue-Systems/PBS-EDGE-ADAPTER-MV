@@ -19,7 +19,7 @@ PBS specifications are in [PBS-PROTOCOL-OPEN](https://github.com/Pale-Blue-Syste
 1. **One envelope, one bundle.** Each envelope maps to exactly one bundle (PBS-DTN-MAP-01 Section 5.1; PBS-DTN-MAP-02 Section 2).
 2. **Opaque envelope.** The complete envelope, 44-byte header and payload, is the payload block content, unmodified (PBS-DTN-MAP-01 Sections 6.2 and 6.4).
 3. **Configured addressing.** The destination EID, source node ID and report-to EID come from the Authority Context map (Section A.5).
-4. **Bounded lifetime.** The bundle lifetime does not extend past the envelope's TTL (PBS-DTN-MAP-02 Section 4).
+4. **Bounded lifetime.** For TTL > 0, the bundle lifetime ends no later than Timestamp + TTL and does not exceed TTL × 1000 ms (PBS-DTN-MAP-02 Section 4).
 5. **Determinism.** Identical envelope bytes, Authority Context entry, configured default lifetime, sequence number and clock reading produce identical bundle bytes.
 
 ---
@@ -44,7 +44,7 @@ The adapter accepts a PBS-ENV-01 v1.3 envelope: a fixed 44-byte big-endian heade
 
 The header contains no destination, scope, authority or message identifier field, and no version field other than Magic. No header field contributes to a bundle EID. Every header byte and the payload travel unmodified in the payload block (Section A.7).
 
-`PBS_LINK.parse_envelope` (PBS_LINK 0.1.1) performs the magic, CRC32, priority and payload-length checks in the order of PBS-ENV-01 Section 14. The adapter then checks the input length and the TTL. Section A.10 lists the rejections.
+`PBS_LINK.parse_envelope` (PBS_LINK 0.1.1) checks the 44-byte minimum length, magic, CRC32, priority and payload length, in that order. The adapter then checks the input length and the TTL. The payload-length check therefore precedes the TTL check; PBS-ENV-01 Section 14 lists TTL as step 4 and payload extraction as step 5. Either failure discards the envelope and produces no bundle; only the exception differs. Section A.10 lists the rejections.
 
 ---
 
@@ -55,10 +55,10 @@ The bundle is a CBOR indefinite-length array: the primary block, the payload blo
 | Element | Value | RFC 9171 |
 |---------|-------|----------|
 | Version | 7 | 4.3.1 |
-| Bundle processing control flags | 0 | 4.2.3 |
+| Bundle processing control flags | 0; 0x04 (bundle must not be fragmented) when the source is the null endpoint | 4.2.3 |
 | CRC type | 2 (CRC32C) | 4.2.1 |
 | Destination EID | Authority Context `dest` | 4.3.1 |
-| Source node ID | Authority Context `src` | 4.2.5.2, 4.3.1 |
+| Source node ID | Authority Context `src` (Section A.5.3) | 4.2.5.1.1, 4.2.5.1.2, 4.2.5.2, 4.3.1 |
 | Report-to EID | Authority Context `report_to` | 4.3.1 |
 | Creation timestamp | [DTN time in ms, sequence number] (Section A.6.1) | 4.2.6, 4.2.7 |
 | Lifetime | Section A.6.2, milliseconds | 4.3.1 |
@@ -71,19 +71,30 @@ The bundle is a CBOR indefinite-length array: the primary block, the payload blo
 
 ### A.5.1 Source of the EIDs
 
-The Authority Context map is adapter configuration (`AuthorityContextMap` in the worked example). Each entry, keyed by an authority context name, holds three BPv7 EIDs: `dest`, `src` and `report_to`. The caller names one context for each envelope. No envelope field contributes to any EID. PBS-DTN-MAP-01 Sections 6.1 and 8 likewise configure the destination EID at the gateway, not in the envelope. [PBS-AUTHORITY-CONTEXT](PBS-AUTHORITY-CONTEXT.md) defines the Authority Context.
+The Authority Context map is adapter configuration (`AuthorityContextMap` in the worked example). Each entry, keyed by an authority context name, holds three BPv7 EIDs: `dest`, `src` and `report_to`. The caller names one context for each envelope. No envelope field contributes to any EID. PBS-DTN-MAP-01 Sections 6.1 and 8 likewise configure the destination EID at the gateway, not in the envelope. The adapter does not read PBS-ADDR-01 address TLVs in the payload and does not map them to EIDs (PBS-ADDR-01 Section 11; PBS-DTN-MAP-02 Section 3). [PBS-AUTHORITY-CONTEXT](PBS-AUTHORITY-CONTEXT.md) defines the Authority Context.
 
 ### A.5.2 EID Schemes and Encoding
 
-| URI | CBOR encoding | RFC 9171 |
-|-----|---------------|----------|
-| `dtn://pbsf.example/luna/ops` | `[1, "//pbsf.example/luna/ops"]` | 4.2.5.1.1, 9.6 |
-| `dtn:none` | `[1, 0]` | 4.2.5.1.1 |
-| `ipn:4001.10` | `[2, [4001, 10]]` | 4.2.5.1.2, 9.6 |
+| URI | CBOR encoding | Rule |
+|-----|---------------|------|
+| `dtn://pbsf.example/luna/ops` | `[1, "//pbsf.example/luna/ops"]` | RFC 9171 Sections 4.2.5.1.1, 9.6 |
+| `dtn:none` (null endpoint) | `[1, 0]` | RFC 9171 Section 4.2.5.1.1 |
+| `ipn:4001.10` | `[2, [4001, 10]]` | RFC 9171 Sections 4.2.5.1.2, 9.6 |
+| `ipn:0.0` (null endpoint) | `[2, [0, 0]]` | RFC 9758 Section 5.2 |
 
 ### A.5.3 Source Node ID
 
-The primary block's source field holds a node ID or the null endpoint `dtn:none` (RFC 9171 Section 4.3.1). A dtn-scheme EID serves as a node ID only when its demux is empty, for example `dtn://edge-17.pbsf.example/` (Section 4.2.5.1.1). An ipn-scheme EID serves as a node ID only when its service number is 0, for example `ipn:4017.0` (Section 4.2.5.1.2). `AuthorityContextMap` rejects any other `src` when it is constructed.
+The primary block's source field identifies the node at which the bundle was initially transmitted, or holds the null endpoint ID for an anonymous bundle (RFC 9171 Section 4.3.1). RFC 9171 Section 4.2.5.2 allows the EID of any singleton endpoint to serve as a node ID. Section 4.2.5.1.1 states that no dtn EID with a non-empty demux may do so; the adapter applies Section 4.2.5.2. RFC 9758 Section 5.3, which updates RFC 9171, allows any ipn EID of a node as the source node ID of bundles that node creates.
+
+`src` is the EID of a singleton endpoint of the adapter's BP node, or the null endpoint. `AuthorityContextMap` accepts:
+
+- `dtn:none` or `ipn:0.0`, the null endpoint (RFC 9171 Section 4.2.5.1.1; RFC 9758 Section 5.2);
+- a dtn EID `dtn://node-name/demux` with a non-empty node-name and a demux that does not begin with `~` (RFC 9171 Section 4.2.5.1.1);
+- an ipn EID other than `ipn:0.N` with N ≠ 0, which RFC 9758 Section 3.4.1 forbids composing.
+
+It rejects any other `src` with `ValueError` when it is constructed. A dtn EID whose demux begins with `~` identifies a non-singleton endpoint and is rejected. The worked example uses the administrative endpoints `dtn://edge-17.pbsf.example/` and `ipn:4017.0`. The PBS-DTN-MAP-01 Section 8 example source EID `ipn:99.1` is accepted.
+
+When `src` is the null endpoint, the adapter sets bundle processing control flag 0x04, "bundle must not be fragmented", and sets no status report request flag (RFC 9171 Section 4.2.3).
 
 ### A.5.4 Source ID Translation
 
@@ -95,12 +106,12 @@ The worked example does not implement the PBS-DTN-MAP-01 Section 8 translation o
 
 ### A.6.1 Creation Timestamp
 
-- **Creation time.** DTN time is the count of milliseconds since 2000-01-01 00:00:00 +0000 (UTC) and is not affected by leap seconds (RFC 9171 Section 4.2.6). Unix time also excludes leap seconds, and the DTN epoch is Unix time 946 684 800 s. The adapter therefore computes creation time = Unix time in ms − 946 684 800 000, truncating one reading of the clock (`clock_us`, Unix time in microseconds) to whole milliseconds. A clock reading at or before the DTN epoch is rejected, because DTN time 0 means "time unknown".
+- **Creation time.** DTN time is the number of milliseconds elapsed since 2000-01-01 00:00:00 +0000 (UTC) and is not affected by leap seconds (RFC 9171 Section 4.2.6). RFC 9171 defines no conversion from Unix time. The adapter computes creation time = Unix time in ms − 946 684 800 000, the offset ION bpv7 uses (`EPOCH_2000_SEC` = 946 684 800 s in `bpv7/library/bpP.h`, <https://github.com/nasa-jpl/ION-DTN>). Unix time omits the 5 leap seconds inserted since 2000-01-01, so the result is 5000 ms less than a count of elapsed SI milliseconds. The adapter truncates one reading of the clock (`clock_us`, Unix time in microseconds) to whole milliseconds. A clock reading at or before the DTN epoch is rejected, because DTN time 0 means "time unknown".
 - **Sequence number.** RFC 9171 Section 4.2.7 takes the sequence number from a counter managed by the source node's bundle protocol agent. The worked example takes it as the `creation_seq` argument.
 
 ### A.6.2 Lifetime
 
-PBS-DTN-MAP-02 Section 4 requires a lifetime that cannot extend the PBS message beyond its expiry. Let *D* be the configured default lifetime in ms (*D* > 0), *T* the envelope TTL in seconds, and *age* = now − Timestamp in µs, with now taken from the same clock reading as the creation time.
+PBS-DTN-MAP-02 Section 4 requires a lifetime that cannot extend the PBS message beyond its expiry. Let *D* be the configured default lifetime in ms (*D* > 0), *T* the envelope TTL in seconds, and *age* = max(0, now − Timestamp) in µs, with now taken from the same clock reading as the creation time. A Timestamp later than the adapter clock gives age 0.
 
 | Condition | Result | Rule |
 |-----------|--------|------|
@@ -109,7 +120,7 @@ PBS-DTN-MAP-02 Section 4 requires a lifetime that cannot extend the PBS message 
 | *T* > 0, *remaining* ≤ 0 | rejected, `EnvelopeExpiredError` | Less than 1 ms remains; no positive lifetime fits |
 | *T* > 0, otherwise | lifetime = min(*D*, *remaining*) | PBS-DTN-MAP-02 Section 4 |
 
-*remaining* = ⌊(*T* × 10⁶ − *age*) / 1000⌋ ms, which equals *T* × 1000 minus the age in milliseconds rounded up. Because creation time and age come from one clock reading, creation time + lifetime never exceeds Timestamp + TTL on the DTN time scale.
+*remaining* = ⌊(*T* × 10⁶ − *age*) / 1000⌋ ms, which equals *T* × 1000 minus the age in milliseconds rounded up. Because creation time and age come from one clock reading, creation time + lifetime never exceeds Timestamp + TTL on the DTN time scale, and the lifetime never exceeds *T* × 1000 ms.
 
 Examples with *D* = 60 000 ms, taken from the tests:
 
@@ -120,12 +131,13 @@ Examples with *D* = 60 000 ms, taken from the tests:
 | 3600 s | 0 s | 60 000 ms |
 | 30 s | 12.5005 s | 17 499 ms |
 | 30 s | 29.999 s | 1 ms |
+| 30 s | −3600 s (Timestamp ahead of the clock) | 30 000 ms |
 | 30 s | 30 s | rejected |
 | 30 s | 30.000001 s | rejected |
 
-The adapter evaluates expiry against the Timestamp and leaves the TTL field unchanged (the timestamp-based method, RECOMMENDED by PBS-ENV-01 Section 12.3). The header CRC32 therefore stays valid, and PBS-DTN-MAP-01 Section 6.4 ("PBS envelopes MUST NOT be modified during DTN encapsulation") holds.
+The adapter evaluates expiry against the Timestamp and leaves the TTL field unchanged (the timestamp-based method, RECOMMENDED by PBS-ENV-01 Section 12.3). The header CRC32 therefore stays valid, and PBS-DTN-MAP-01 Section 6.4 ("PBS envelopes MUST NOT be modified during DTN encapsulation") holds. PBS-ENV-01 Section 15 also states that gateways "MUST decrement TTL appropriately" and "MUST recalculate CRC32 after TTL modification". The adapter follows Section 12.3 and PBS-DTN-MAP-01 Section 6.4 instead: it decrements no TTL and recalculates no CRC32.
 
-PBS-DTN-MAP-01 Section 6.1 maps TTL to lifetime by unit conversion. PBS-DTN-MAP-02 Section 4 also subtracts the time elapsed before bundle creation. For an envelope of age 0 with *T* × 1000 ≤ *D*, both rules give *T* × 1000 ms.
+PBS-DTN-MAP-01 Section 6.1 maps TTL to lifetime by unit conversion. PBS-DTN-MAP-02 Section 4 bounds the lifetime by the interval remaining at bundle creation. For an envelope of age 0 with *T* × 1000 ≤ *D*, both rules give *T* × 1000 ms.
 
 ### A.6.3 Fields Not Mapped
 
@@ -173,6 +185,10 @@ The receiving PBS node then processes the envelope in the order of PBS-ENV-01 Se
 | Envelope expired, or less than 1 ms of TTL left | `EnvelopeExpiredError` | Section A.6.2 |
 | Unknown authority context name | `KeyError` | Section A.5.1 |
 | Clock at or before the DTN epoch | `ValueError` | Section A.6.1 |
+| `default_lifetime_ms` ≤ 0 | `ValueError` | Appendix B, Section B.5 |
+| `creation_seq` < 0 | `ValueError` | RFC 9171 Section 4.2.7: the sequence number is a CBOR unsigned integer |
+
+`AuthorityContextMap` raises `ValueError` at construction for an entry that lacks `dest`, `src` or `report_to`, or whose `src` fails Section A.5.3.
 
 ---
 
@@ -186,4 +202,4 @@ The receiving PBS node then processes the envelope in the order of PBS-ENV-01 Se
 | Deadline-to-lifetime bounding | TTL 0, TTL below and above the default, partially aged, expired; creation time + lifetime never exceeds the PBS expiry |
 | EID mapping stability | Identical inputs give identical bundle bytes |
 
-The tests also check the bundle and block structure, the primary block CRC32C, the RFC 7143 Appendix A.4 CRC32C examples, the DTN-millisecond creation time, rejection of corrupted headers and wrong lengths, and the source node ID rule. They do not cover priority preservation, store-and-forward delivery, expiry during disruption, duplicate handling or PBS-SEC-B with BPSec, which need a bundle protocol agent.
+The tests also check the bundle and block structure, the primary block CRC32C, the five RFC 7143 Appendix A.4 CRC32C examples, the DTN-millisecond creation time, rejection of corrupted headers and wrong lengths, the source EID rule of Section A.5.3, flag 0x04 for a null source, and rejection of a negative sequence number and a non-positive default lifetime. They do not cover priority preservation, store-and-forward delivery, expiry during disruption, duplicate handling or PBS-SEC-B with BPSec, which need a bundle protocol agent.

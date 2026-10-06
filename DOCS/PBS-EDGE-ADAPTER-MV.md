@@ -22,7 +22,7 @@ The governing PBS specifications are PBS-ENV-01 v1.3, PBS-DTN-MAP-01 v1.3 and PB
 
 ## 2. Implementation Status
 
-No PBS edge adapter product is published. `pbs_edge_adapter_worked_example.py` implements the outbound conversion of one envelope into the bytes of one bundle (Section 4, steps 2 to 5), with tests. It does not implement ingress or egress interfaces, injection into or delivery from a bundle protocol agent, the inbound direction, configuration loading, or priority-to-QoS mapping.
+No PBS edge adapter product is published. `pbs_edge_adapter_worked_example.py` implements the outbound conversion of one envelope into the bytes of one bundle (Section 4, steps 2 to 5), with tests. It does not implement ingress or egress interfaces, injection into or delivery from a bundle protocol agent, the inbound direction, configuration loading, translation of each Source ID to its own EID (PBS-DTN-MAP-01 Section 8), mapping of PBS-ADDR-01 payload addresses to EIDs (PBS-ADDR-01 Section 11), or priority-to-QoS mapping.
 
 ---
 
@@ -73,7 +73,7 @@ The adapter reads the Magic, Priority, Timestamp, Size, TTL and CRC32 header fie
 
 Each bundle is a CBOR indefinite-length array of two blocks (RFC 9171 Section 4.1):
 
-- **Primary block** (Section 4.3.1): version 7; processing control flags 0; CRC type 2 (CRC32C); destination EID, source node ID and report-to EID from the Authority Context; creation timestamp of DTN time in milliseconds and a sequence number; lifetime in milliseconds, equal to the configured default for TTL 0 and to min(default, remaining TTL) otherwise; CRC32C.
+- **Primary block** (Section 4.3.1): version 7; processing control flags 0, or 0x04 (bundle must not be fragmented) when the source is the null endpoint (Section 4.2.3); CRC type 2 (CRC32C); destination EID, source node ID and report-to EID from the Authority Context; creation timestamp of DTN time in milliseconds and a sequence number; lifetime in milliseconds, equal to the configured default for TTL 0 and to min(default, remaining TTL) otherwise; CRC32C.
 - **Payload block** (Section 4.3.2): type 1, number 1, flags 0, CRC type 0, the envelope bytes.
 
 The adapter adds no extension blocks.

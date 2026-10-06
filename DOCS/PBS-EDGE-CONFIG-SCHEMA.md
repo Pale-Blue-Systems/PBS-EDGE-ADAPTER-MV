@@ -32,7 +32,7 @@ adapter:
 authority_contexts:
   <name>:
     dest: string          # BPv7 EID, dtn or ipn URI
-    src: string           # node ID URI, or "dtn:none"
+    src: string           # singleton-endpoint EID URI, "dtn:none" or "ipn:0.0"
     report_to: string     # BPv7 EID, dtn or ipn URI
 
 bundle:
@@ -76,7 +76,7 @@ authority_contexts:
 |-------|------|-------------|
 | `<name>` | string key | Authority context name, unique in this file |
 | `dest` | EID URI | Destination EID (RFC 9171 Section 4.3.1) |
-| `src` | EID URI | Source node ID: a dtn URI with an empty demux, an ipn URI with service number 0, or `dtn:none` (RFC 9171 Sections 4.2.5.1.1, 4.2.5.1.2, 4.3.1) |
+| `src` | EID URI | Source node ID: the EID of a singleton endpoint of the adapter's BP node (RFC 9171 Section 4.2.5.2; RFC 9758 Section 5.3), or the null endpoint `dtn:none` or `ipn:0.0`. A dtn EID whose demux begins with `~` identifies a non-singleton endpoint and is rejected. |
 | `report_to` | EID URI | Report-to EID (RFC 9171 Section 4.3.1) |
 
 EID URIs use the dtn scheme (`dtn://node-name/demux` or `dtn:none`) or the ipn scheme (`ipn:node.service`), encoded in the bundle as RFC 9171 Section 4.2.5.1 specifies. No envelope field enters any EID. [PBS-AUTHORITY-CONTEXT](PBS-AUTHORITY-CONTEXT.md) defines the Authority Context.
@@ -94,7 +94,7 @@ bundle:
 |-------|------|-------------|
 | `default_lifetime_ms` | integer, ms, > 0 | Bundle lifetime for an envelope with TTL 0, and the upper bound of the lifetime otherwise. The remaining PBS TTL bounds the lifetime further (PBS-DTN-MAP-02 Section 4; [PBS-BPv7-MAPPING-APPENDIX](PBS-BPv7-MAPPING-APPENDIX.md) Section A.6.2). |
 
-60 000 ms is the worked example's default value.
+`pbs_to_bpv7_bundle_mv` defaults `default_lifetime_ms` to 60 000 ms; the worked example run passes 300 000 ms.
 
 ---
 
@@ -116,7 +116,7 @@ A valid configuration has:
 
 - at least one entry under `authority_contexts`;
 - `dest`, `src` and `report_to` in every entry;
-- a node ID or `dtn:none` as every `src`;
+- as every `src`, the EID of a singleton endpoint of the adapter's BP node or the null endpoint (Section B.4);
 - a positive integer `bundle.default_lifetime_ms`.
 
 The worked example enforces the second and third rules when `AuthorityContextMap` is constructed, and the fourth when it selects a lifetime.

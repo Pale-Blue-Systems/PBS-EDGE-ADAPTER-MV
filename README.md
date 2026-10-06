@@ -15,16 +15,17 @@ No PBS edge adapter product is published. The worked example builds bundle bytes
 | Step | Clause |
 |------|--------|
 | Parse the envelope with PBS_LINK; reject a bad magic byte, a header CRC32 mismatch, a reserved priority (5–255) or a short payload | PBS-ENV-01 v1.3 Sections 13, 14 |
-| Reject input longer than the 44-byte header plus `Size` | PBS-ENV-01 Sections 4, 11 |
+| Reject input longer than the 44-byte header plus `Size` | PBS-DTN-MAP-01 Sections 5.1, 6.2 (one envelope per payload block) |
 | Reject an expired envelope | PBS-ENV-01 Sections 12.1, 12.2, 15 |
 | Map one envelope to exactly one bundle | PBS-DTN-MAP-01 Section 5.1; PBS-DTN-MAP-02 Section 2 |
 | Place the entire envelope (header and payload) in a single payload block, unmodified, header CRC32 preserved | PBS-DTN-MAP-01 Sections 6.2, 6.4 |
 | Set the lifetime to the configured default for TTL 0, otherwise min(default, TTL × 1000 − age in ms) | PBS-DTN-MAP-02 Section 4 |
-| Take the destination EID, source node ID and report-to EID from the Authority Context map | PBS-DTN-MAP-01 Sections 6.1, 8 (destination configured at the gateway) |
+| Take the destination EID, source node ID and report-to EID from the Authority Context map; accept as source a singleton-endpoint EID or the null endpoint | PBS-DTN-MAP-01 Section 6.1 (Destination EID row) and Section 8 (destination EIDs configured at the gateway); RFC 9171 Section 4.2.5.2; RFC 9758 Section 5.3 |
 | Write the creation time as DTN time in milliseconds since 2000-01-01T00:00:00Z | RFC 9171 Sections 4.2.6, 4.2.7 |
+| Set processing control flags 0, or 0x04 (bundle must not be fragmented) when the source is the null endpoint | RFC 9171 Section 4.2.3 |
 | Encode the bundle in CBOR with a CRC32C primary block and a CRC-type-0 payload block | RFC 9171 Sections 4.1, 4.2.1, 4.2.2, 4.3.1, 4.3.2 |
 
-It does not implement the PBS-DTN-MAP-01 Section 8 translation of each Source ID to its own EID, priority-to-class-of-service mapping (PBS-DTN-MAP-01 Section 6.3; PBS-DTN-MAP-02 Section 5), service intent (PBS-DTN-MAP-02 Section 6), security (PBS-DTN-MAP-02 Section 7), or the inbound direction (PBS-DTN-MAP-01 Section 7).
+It does not implement the PBS-DTN-MAP-01 Section 8 translation of each Source ID to its own EID, the Sequence-to-bundle-sequence row of PBS-DTN-MAP-01 Section 6.1 (the caller supplies `creation_seq`), priority-to-class-of-service mapping (PBS-DTN-MAP-01 Section 6.3; PBS-DTN-MAP-02 Section 5), store-and-forward (PBS-DTN-MAP-01 Section 9), mapping of PBS-ADDR-01 payload addresses to EIDs (PBS-ADDR-01 Section 11), service intent (PBS-DTN-MAP-02 Section 6), security (PBS-DTN-MAP-02 Section 7), failure and status translation (PBS-DTN-MAP-02 Section 9), or the inbound direction (PBS-DTN-MAP-01 Section 7). In place of the PBS-DTN-MAP-01 Section 6.1 TTL-to-lifetime unit conversion, it applies the PBS-DTN-MAP-02 Section 4 bound ([Appendix A, Section A.6.2](DOCS/PBS-BPv7-MAPPING-APPENDIX.md)).
 
 PBS-DTN-MAP-01 (v1.3) and PBS-DTN-MAP-02 (v1.4) are both optional interoperability specifications in the [PBS protocol library](https://github.com/Pale-Blue-Systems/PBS-PROTOCOL-OPEN/tree/main/PBS-RFC-LIB). DTN-MAP-01 defines the envelope-to-bundle mapping at a gateway boundary; DTN-MAP-02 defines endpoint mapping, lifetime and freshness, priority and QoS, service intent and security for BPv7 carriage. [`DOCS/PBS-BPv7-MAPPING-APPENDIX.md`](DOCS/PBS-BPv7-MAPPING-APPENDIX.md) gives the field-level mapping.
 
@@ -32,13 +33,14 @@ PBS-DTN-MAP-01 (v1.3) and PBS-DTN-MAP-02 (v1.4) are both optional interoperabili
 
 ## What the Tests Verify
 
-`TESTS/test_pbs_edge_adapter_worked_example_validation.py` (40 tests) builds envelopes with PBS_LINK at a fixed Timestamp and injects the adapter clock, so every value checked is exact:
+`TESTS/test_pbs_edge_adapter_worked_example_validation.py` (52 tests) builds envelopes with PBS_LINK at a fixed Timestamp and injects the adapter clock, so every value checked is exact:
 
-- **Bundle structure:** CBOR indefinite-length array; primary block of 9 items with version 7, CRC type 2 and the configured EIDs; payload block `[1, 1, 0, 0, envelope]`.
-- **CRC32C:** the primary block CRC recomputes correctly, and `crc32c` reproduces the four CRC32C examples of RFC 7143 Appendix A.4, to which RFC 9171 Section 4.2.1 refers.
+- **Bundle structure:** CBOR indefinite-length array; primary block of 9 items with version 7, CRC type 2 and the configured EIDs; processing control flags 0, and 0x04 for a `dtn:none` or `ipn:0.0` source; payload block `[1, 1, 0, 0, envelope]`.
+- **CRC32C:** the primary block CRC recomputes correctly, and `crc32c` reproduces the five CRC32C examples of RFC 7143 Appendix A.4, to which RFC 9171 Section 4.2.1 refers.
 - **Creation time:** DTN milliseconds; a clock of 2026-01-01T00:00:01.234567Z gives 820 540 801 234 ms. The DTN epoch is Unix time 946 684 800 000 ms.
-- **Lifetime:** TTL 0 gives the default; a TTL below the default gives the TTL, and one above it gives the default; a partially aged envelope gives the remaining TTL (17 499 ms at TTL 30 s, age 12.5005 s); creation time + lifetime never exceeds the envelope's Timestamp + TTL.
-- **Rejections:** expired envelopes, less than 1 ms of TTL left, a corrupted header (Source ID, Timestamp, TTL or CRC32 byte), trailing or missing bytes, unknown authority context, a source EID that is not a node ID.
+- **Lifetime:** TTL 0 gives the default; a TTL below the default gives the TTL, and one above it gives the default; a partially aged envelope gives the remaining TTL (17 499 ms at TTL 30 s, age 12.5005 s); a Timestamp 1 h ahead of the adapter clock gives the TTL (30 000 ms); creation time + lifetime never exceeds the envelope's Timestamp + TTL.
+- **Rejections:** expired envelopes, less than 1 ms of TTL left, a corrupted header (Source ID, Timestamp, TTL or CRC32 byte), trailing or missing bytes, unknown authority context, a source EID that is not a singleton endpoint, a negative sequence number, a non-positive default lifetime.
+- **Source EID rule:** administrative endpoints, `dtn://pbsf.example/edge/node-17`, `ipn:4001.99`, the PBS-DTN-MAP-01 Section 8 example `ipn:99.1` and both null endpoints are accepted; `dtn://pbsf.example/~ops` and `ipn:0.5` are rejected.
 - **Envelope preservation:** payload block bytes equal the envelope bytes, for a 256-byte payload containing every byte value.
 - **Determinism:** identical inputs and clock reading give identical bundle bytes.
 

@@ -9,7 +9,7 @@
 
 This document describes the reference architecture and message flows of the **PBS Edge Adapter (MV)**: its placement between PBS envelope producers and consumers and a BPv7 bundle protocol agent, its components, and the outbound and inbound flows.
 
-In the diagrams, solid outlines mark components that `pbs_edge_adapter_worked_example.py` implements. Dashed outlines mark specified components that are not implemented.
+Inside the PBS Edge Adapter, solid outlines mark components that `pbs_edge_adapter_worked_example.py` implements, and dashed outlines mark specified components that it does not implement. Adapter configuration is drawn dashed: the worked example has no configuration loader. PBS producers and consumers, bundle protocol agents and links are external systems.
 
 ---
 
@@ -43,7 +43,7 @@ flowchart LR
   P1 --> IN --> VAL --> ENC
   AC --> ENC
   ENC --> IO --> BA --> NET --> BA2
-  BA2 --> NET
+  BA2 --> NET --> BA
   BA --> IO
   IO --> EXT --> OUT --> C1
 
@@ -145,7 +145,7 @@ sequenceDiagram
 
 ## 6. Configuration as an Architectural Boundary
 
-Configuration defines the Authority Context map, the default bundle lifetime, and (in a later revision) the interface bindings. [PBS-EDGE-CONFIG-SCHEMA](PBS-EDGE-CONFIG-SCHEMA.md) specifies it.
+Configuration defines the Authority Context map and the default bundle lifetime. The `interfaces` key is reserved (Appendix B, Section B.7). [PBS-EDGE-CONFIG-SCHEMA](PBS-EDGE-CONFIG-SCHEMA.md) specifies the configuration. The worked example takes the equivalent values as Python arguments.
 
 ```mermaid
 flowchart LR
@@ -159,7 +159,7 @@ flowchart LR
   CONF --> IO
 
   classDef planned stroke-dasharray: 5 5
-  class IO planned
+  class CONF,IO planned
 ```
 
 ---
@@ -170,11 +170,14 @@ The adapter and the bundle protocol agent interact only through bundle injection
 
 ```mermaid
 flowchart LR
-  A["PBS Edge Adapter (MV)<br/>validation + encapsulation + extraction"]
+  A["PBS Edge Adapter (MV)<br/>validation + encapsulation (implemented)<br/>extraction (not implemented)"]
   I["Bundle injection / delivery boundary"]
   B["BPv7 bundle protocol agent<br/>forwarding + storage + routing"]
 
   A <--> I <--> B
+
+  classDef planned stroke-dasharray: 5 5
+  class I planned
 ```
 
 ---
