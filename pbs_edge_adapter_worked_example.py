@@ -108,16 +108,37 @@ def eid_ipn(node_num: int, service_num: int) -> EID:
     return [2, [int(node_num), int(service_num)]]
 
 
+def is_null_endpoint(eid: EID) -> bool:
+    """
+    Return True for the null endpoint: dtn:none, encoded [1, 0] (RFC 9171
+    Section 4.2.5.1.1), or ipn:0.0, encoded [2, [0, 0]] (RFC 9758 Section 5.2).
+    """
+    return eid == [1, 0] or eid == [2, [0, 0]]
+
+
 def is_source_node_id(eid: EID) -> bool:
     """
     Return True if eid may occupy the primary block's Source node ID field.
 
-    RFC 9171 Section 4.3.1 permits a node ID or the null endpoint (dtn:none).
-    A dtn-scheme EID serves as a node ID only when its demux is empty, as in
-    "dtn://node-name/" (Section 4.2.5.1.1). An ipn-scheme EID serves as a
-    node ID only when its service number is 0 (Section 4.2.5.1.2).
+    Accepted:
+      - the null endpoint, dtn:none or ipn:0.0 (RFC 9171 Section 4.3.1;
+        RFC 9758 Section 5.2);
+      - a dtn EID "dtn://node-name/demux" with a non-empty node-name and a
+        demux that does not begin with "~", which identifies a singleton
+        endpoint (RFC 9171 Section 4.2.5.1.1);
+      - an ipn EID [2, [node, service]] of non-negative integers (RFC 9171
+        Section 4.2.5.1.2; RFC 9758 Section 5.3).
+    Rejected: a dtn EID whose demux begins with "~" (not a singleton
+    endpoint), a dtn EID without the "/" after node-name, ipn:0.N with N
+    non-zero (RFC 9758 Section 3.4.1: MUST NOT be composed), and anything else.
+
+    RFC 9171 Section 4.2.5.2 allows the EID of any singleton endpoint to
+    serve as a node ID. Section 4.2.5.1.1 states that no dtn EID with a
+    non-empty demux may do so; this example applies Section 4.2.5.2.
+    RFC 9758 Section 5.3, which updates RFC 9171, allows any ipn EID of the
+    node as the source node ID of bundles the node creates.
     """
-    if len(eid) != 2:
+    if not isinstance(eid, list) or len(eid) != 2:
         return False
     scheme, ssp = eid
     if scheme == 1:
@@ -126,9 +147,14 @@ def is_source_node_id(eid: EID) -> bool:
         if not isinstance(ssp, str) or not ssp.startswith("//"):
             return False
         node_name, delim, demux = ssp[2:].partition("/")
-        return bool(node_name) and delim == "/" and demux == ""
+        return bool(node_name) and delim == "/" and not demux.startswith("~")
     if scheme == 2:
-        return isinstance(ssp, list) and len(ssp) == 2 and ssp[1] == 0
+        if not (isinstance(ssp, list) and len(ssp) == 2):
+            return False
+        node, service = ssp
+        if not all(isinstance(n, int) and not isinstance(n, bool) and n >= 0 for n in ssp):
+            return False
+        return node != 0 or service == 0
     return False
 
 
@@ -155,8 +181,9 @@ class AuthorityContextMap:
                 raise ValueError(f"Authority context {name!r} lacks {sorted(missing)}")
             if not is_source_node_id(row["src"]):
                 raise ValueError(
-                    f"Authority context {name!r}: src {row['src']!r} is not a node ID "
-                    "(RFC 9171 Sections 4.2.5.1.1, 4.2.5.1.2, 4.3.1)"
+                    f"Authority context {name!r}: src {row['src']!r} is not a singleton "
+                    "endpoint or the null endpoint (RFC 9171 Sections 4.2.5.1.1, "
+                    "4.2.5.2; RFC 9758 Sections 3.4.1, 5.3)"
                 )
 
     def resolve(self, authority_context: str) -> Tuple[EID, EID, EID]:
@@ -172,6 +199,12 @@ class AuthorityContextMap:
 # BPv7 bundle construction (RFC 9171 Sections 4.1, 4.3.1, 4.3.2)
 # -----------------------------
 
+# Bundle processing control flag bit 2 (RFC 9171 Section 4.2.3). A bundle
+# whose source is the null endpoint MUST set it and MUST set no status
+# report request flag.
+BPF_MUST_NOT_FRAGMENT = 0x000004
+
+
 @dataclass(frozen=True)
 class BPv7Primary:
     """
@@ -186,7 +219,7 @@ class BPv7Primary:
     creation_time_dtn: int         # DTN time, milliseconds (RFC 9171 Section 4.2.6)
     creation_seq: int              # creation timestamp sequence number (Section 4.2.7)
     lifetime_ms: int               # milliseconds past the creation time (Section 4.3.1)
-    bundle_proc_flags: int = 0     # no flags set: not a fragment, not an administrative record
+    bundle_proc_flags: int = 0     # bit field of RFC 9171 Section 4.2.3; 0 = no flag set
     crc_type: int = 2              # 2 = CRC32C (RFC 9171 Section 4.2.1)
 
     def to_cbor_with_crc_placeholder(self) -> list[Any]:
@@ -272,12 +305,15 @@ def build_bpv7_bundle(primary: BPv7Primary, payload_block: BPv7PayloadBlock) -> 
 # Time (RFC 9171 Section 4.2.6)
 # -----------------------------
 
-# RFC 9171 Section 4.2.6 defines DTN time as the number of milliseconds
-# elapsed since the DTN epoch, 2000-01-01 00:00:00 +0000 (UTC), and states
-# that DTN time is not affected by leap seconds. Unix (POSIX) time also
-# counts every day as 86 400 s, and the DTN epoch is Unix time 946 684 800 s.
-# DTN time is therefore Unix time in milliseconds minus 946 684 800 000, with
-# no leap-second term. The result is as accurate as the clock supplied.
+# RFC 9171 Section 4.2.6: DTN time is the number of milliseconds elapsed
+# since the DTN epoch, 2000-01-01 00:00:00 +0000 (UTC), and is not affected
+# by leap seconds. RFC 9171 defines no conversion from Unix time. This
+# example uses DTN ms = Unix ms - 946 684 800 000 (the DTN epoch in Unix
+# time), the offset ION bpv7 uses (EPOCH_2000_SEC = 946684800 in
+# bpv7/library/bpP.h). Unix time omits the 5 leap seconds inserted since
+# 2000-01-01 (IERS Leap_Second.dat: TAI-UTC 32 s from 1999-01-01, 37 s from
+# 2017-01-01), so this value is 5000 ms less than a count of elapsed SI
+# milliseconds.
 DTN_EPOCH_UNIX_MS = 946_684_800_000
 
 
@@ -318,7 +354,7 @@ class EnvelopeExpiredError(EdgeAdapterError):
 
 
 class EnvelopeLengthError(EdgeAdapterError):
-    """The input length differs from the 44-byte header plus the Size field."""
+    """The input is longer than the 44-byte header plus the Size field."""
 
 
 def bundle_lifetime_ms(envelope: PBSEnvelope, now_us: int, default_lifetime_ms: int) -> int:
@@ -331,11 +367,13 @@ def bundle_lifetime_ms(envelope: PBSEnvelope, now_us: int, default_lifetime_ms: 
     TTL > 0: the envelope expires at Timestamp + TTL (PBS-ENV-01 Section
     12.2). Return min(default_lifetime_ms, remaining_ms), where
       remaining_ms = TTL * 1000 - age_ms
-      age_ms       = (now_us - Timestamp) in milliseconds, rounded up.
+      age_ms       = max(0, now_us - Timestamp) in milliseconds, rounded up.
     Rounding the age up keeps creation time + lifetime at or before the PBS
-    expiry instant when both are taken from now_us.
+    expiry instant when both are taken from now_us. A Timestamp later than
+    now_us gives age 0, so the lifetime never exceeds TTL * 1000.
 
-    Raises EnvelopeExpiredError if remaining_ms <= 0.
+    Raises EnvelopeExpiredError if remaining_ms <= 0, and ValueError if
+    default_lifetime_ms <= 0.
     """
     if default_lifetime_ms <= 0:
         raise ValueError("default_lifetime_ms must be positive")
@@ -343,7 +381,7 @@ def bundle_lifetime_ms(envelope: PBSEnvelope, now_us: int, default_lifetime_ms: 
         return default_lifetime_ms
 
     ttl_us = envelope.ttl * 1_000_000
-    age_us = now_us - envelope.timestamp
+    age_us = max(0, now_us - envelope.timestamp)
     remaining_ms = (ttl_us - age_us) // 1_000
     if age_us > ttl_us:
         raise EnvelopeExpiredError(
@@ -376,16 +414,25 @@ def pbs_to_bpv7_bundle_mv(
     authority_map        Authority Context map (adapter configuration)
     default_lifetime_ms  configured bundle lifetime, used when TTL is 0 and as
                          the upper bound otherwise
-    creation_seq         creation timestamp sequence number (RFC 9171 Section
-                         4.2.7); a BP agent supplies it from its own counter
+    creation_seq         creation timestamp sequence number, a non-negative
+                         integer (RFC 9171 Section 4.2.7); a BP agent supplies
+                         it from its own counter
     clock_us             returns Unix time in microseconds; read once, for both
                          the creation time and the envelope age
 
+    The bundle processing control flags are 0, or 0x04 ("bundle must not be
+    fragmented") when the source is the null endpoint (RFC 9171 Section 4.2.3).
+
     Raises PBS_LINK.PBSValidationError or a subclass (PBSMagicError,
     PBSCRCError, PBSPriorityError) for an invalid or truncated envelope,
-    EnvelopeLengthError for trailing bytes, EnvelopeExpiredError, and
-    KeyError for an unknown authority context.
+    EnvelopeLengthError for trailing bytes, EnvelopeExpiredError, KeyError
+    for an unknown authority context, and ValueError for a negative
+    creation_seq, a non-positive default_lifetime_ms, or a clock reading at
+    or before the DTN epoch.
     """
+    if creation_seq < 0:
+        raise ValueError("creation_seq must be a non-negative integer (RFC 9171 Section 4.2.7)")
+
     envelope = parse_envelope(pbs_envelope_bytes)
     expected_len = HEADER_SIZE + envelope.size
     if len(pbs_envelope_bytes) != expected_len:
@@ -405,7 +452,7 @@ def pbs_to_bpv7_bundle_mv(
         creation_time_dtn=unix_us_to_dtn_ms(now_us),
         creation_seq=creation_seq,
         lifetime_ms=lifetime_ms,
-        bundle_proc_flags=0,
+        bundle_proc_flags=BPF_MUST_NOT_FRAGMENT if is_null_endpoint(src) else 0,
         crc_type=2,  # CRC32C
     )
 
@@ -423,8 +470,9 @@ def pbs_to_bpv7_bundle_mv(
 
 if __name__ == "__main__":
     # 1) Authority Context map. Both EID schemes are shown; the run uses the
-    #    dtn-scheme entry. Each src is a node ID: a dtn EID with an empty
-    #    demux, or an ipn EID with service number 0.
+    #    dtn-scheme entry. Each src is the administrative endpoint of the
+    #    adapter's BP node: a dtn EID with an empty demux or an ipn EID with
+    #    service number 0 (RFC 9171 Sections 4.2.5.1.1, 4.2.5.1.2).
     ac_map = AuthorityContextMap(
         table={
             "pbsf.luna.ops": {

@@ -158,11 +158,20 @@ def test_bpv7_bundle_primary_crc_and_payload_roundtrip():
         (b"\xff" * 32, "43aba862"),
         (bytes(range(32)), "4e79dd46"),
         (bytes(range(31, -1, -1)), "5cdb3f11"),
+        # iSCSI SCSI Read (10) Command PDU, 48 bytes.
+        (
+            bytes.fromhex(
+                "01c00000" + "00" * 12 + "14000000" + "00000400" + "00000014"
+                + "00000018" + "28000000" + "00" * 4 + "02000000" + "00" * 4
+            ),
+            "563a96d9",
+        ),
     ],
 )
 def test_crc32c_matches_rfc7143_examples(data, crc_lsb_first):
     # RFC 9171 Section 4.2.1 refers to RFC 7143 Appendix A.4 for CRC32C
-    # examples. RFC 7143 lists each CRC least significant byte first.
+    # examples; this list holds all five. RFC 7143 lists each CRC least
+    # significant byte first.
     assert crc32c(data).to_bytes(4, "little") == bytes.fromhex(crc_lsb_first)
 
 
@@ -189,6 +198,13 @@ def test_creation_time_is_dtn_milliseconds():
     # 1_767_225_601_234 ms Unix - 946_684_800_000 ms = 820_540_801_234 ms.
     bundle = encapsulate(make_envelope(ttl=0), now_us=T0_US + 1_234_567, creation_seq=42)
     assert cbor2.loads(bundle)[0][6] == [820_540_801_234, 42]
+
+
+def test_negative_creation_seq_is_rejected():
+    # RFC 9171 Section 4.2.7: the sequence number is a CBOR unsigned integer.
+    with pytest.raises(ValueError):
+        encapsulate(make_envelope(ttl=0), now_us=T0_US, creation_seq=-1)
+    assert cbor2.loads(encapsulate(make_envelope(ttl=0), now_us=T0_US, creation_seq=0))[0][6][1] == 0
 
 
 def test_clock_at_or_before_dtn_epoch_is_rejected():
@@ -236,6 +252,24 @@ def test_partially_aged_envelope_gets_remaining_ttl():
 def test_expired_envelope_is_rejected(age_us):
     with pytest.raises(EnvelopeExpiredError):
         encapsulate(make_envelope(ttl=30), now_us=T0_US + age_us)
+
+
+def test_timestamp_ahead_of_adapter_clock_gives_age_zero():
+    # Source clock 1 h ahead of the adapter clock: the age is taken as 0, so
+    # the lifetime is the TTL, not TTL + 1 h.
+    assert lifetime_of(ttl=30, age_us=-3_600_000_000) == 30_000
+
+
+@pytest.mark.parametrize("default_lifetime_ms", [0, -1])
+def test_non_positive_default_lifetime_is_rejected(default_lifetime_ms):
+    with pytest.raises(ValueError):
+        pbs_to_bpv7_bundle_mv(
+            make_envelope(ttl=30),
+            "pbsf.luna.ops",
+            AC_MAP,
+            default_lifetime_ms=default_lifetime_ms,
+            clock_us=lambda: T0_US,
+        )
 
 
 @pytest.mark.parametrize("age_us", [0, 1, 999, 1_000, 12_500_500, 29_000_001, 29_999_000])
@@ -297,7 +331,8 @@ def test_identical_inputs_give_identical_bundles():
 
 
 # -----------------------------
-# Authority Context map (RFC 9171 Sections 4.2.5.1.1, 4.2.5.1.2, 4.3.1)
+# Authority Context map and source node ID (RFC 9171 Sections 4.2.3,
+# 4.2.5.1.1, 4.2.5.1.2, 4.2.5.2, 4.3.1; RFC 9758 Sections 3.4.1, 5.2, 5.3)
 # -----------------------------
 
 def test_unknown_authority_context_is_rejected():
@@ -310,26 +345,53 @@ def test_unknown_authority_context_is_rejected():
 @pytest.mark.parametrize(
     "eid, expected",
     [
-        (eid_dtn("//edge-17.pbsf.example/"), True),
-        (eid_dtn("none"), True),
-        (eid_ipn(4017, 0), True),
-        (eid_dtn("//pbsf.example/edge/node-17"), False),  # non-empty demux
-        (eid_dtn("//edge-17.pbsf.example"), False),       # no name delimiter
-        (eid_ipn(4001, 99), False),                        # service number not 0
+        (eid_dtn("//edge-17.pbsf.example/"), True),        # administrative endpoint
+        (eid_dtn("//pbsf.example/edge/node-17"), True),    # singleton (RFC 9171 Section 4.2.5.2)
+        (eid_ipn(4017, 0), True),                           # administrative endpoint
+        (eid_ipn(4001, 99), True),                          # any ipn EID (RFC 9758 Section 5.3)
+        (eid_dtn("none"), True),                            # null endpoint
+        (eid_ipn(0, 0), True),                              # null endpoint (RFC 9758 Section 5.2)
+        (eid_dtn("//pbsf.example/~ops"), False),            # "~" demux: not a singleton
+        (eid_dtn("//edge-17.pbsf.example"), False),         # no name delimiter
+        (eid_ipn(0, 5), False),                             # RFC 9758 Section 3.4.1
+        ([2, [4001]], False),                               # malformed ipn SSP
     ],
 )
 def test_source_node_id_rule(eid, expected):
     assert is_source_node_id(eid) is expected
 
 
-def test_map_rejects_source_that_is_not_a_node_id():
+def test_map_rejects_source_that_is_not_a_singleton_endpoint():
     with pytest.raises(ValueError):
         AuthorityContextMap(
             table={
                 "bad": {
-                    "dest": eid_ipn(4001, 10),
-                    "src": eid_ipn(4001, 99),
-                    "report_to": eid_ipn(4001, 11),
+                    "dest": eid_dtn("//pbsf.example/luna/ops"),
+                    "src": eid_dtn("//pbsf.example/~ops"),
+                    "report_to": eid_dtn("//pbsf.example/ops/reports"),
                 }
             }
         )
+
+
+def test_map_accepts_pbs_dtn_map_01_example_source_eid():
+    # PBS-DTN-MAP-01 Section 8 maps "Rover-Alpha" to ipn:99.1.
+    ac_map = AuthorityContextMap(
+        table={"a": {"dest": eid_ipn(1, 1), "src": eid_ipn(99, 1), "report_to": eid_ipn(99, 1)}}
+    )
+    assert ac_map.resolve("a")[1] == [2, [99, 1]]
+
+
+@pytest.mark.parametrize("null_src", [eid_dtn("none"), eid_ipn(0, 0)])
+def test_null_source_sets_must_not_fragment_flag(null_src):
+    # RFC 9171 Section 4.2.3: with a null source, "Bundle must not be
+    # fragmented" (0x04) MUST be 1 and every status report request flag 0.
+    ac_map = AuthorityContextMap(
+        table={"anon": {"dest": eid_ipn(4001, 10), "src": null_src, "report_to": eid_dtn("none")}}
+    )
+    bundle = pbs_to_bpv7_bundle_mv(
+        make_envelope(ttl=30), "anon", ac_map, clock_us=lambda: T0_US
+    )
+    primary_block = cbor2.loads(bundle)[0]
+    assert primary_block[1] == 0x04
+    assert primary_block[4] == null_src
