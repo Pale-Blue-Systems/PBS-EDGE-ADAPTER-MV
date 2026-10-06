@@ -101,10 +101,10 @@ This repository is written for:
 
 - `README.md` — Overview, context, and intent  
 - `WHY-NOW.md` — Architectural motivation and future context  
-- `docs/` — Architecture, mapping, and configuration specifications  
-- `reference/` — Minimal reference logic illustrating the adapter concept  
-- `examples/` — Example PBS envelopes and corresponding BPv7 mappings  
-- `tests/` — Validation tests for the worked example  
+- `DOCS/` — Architecture, BPv7 mapping, authority context, and configuration specifications  
+- `pbs_edge_adapter_worked_example.py` — Worked example: a PBS envelope encapsulated into a BPv7 bundle  
+- `TESTS/` — Validation test for the worked example  
+- `CHANGELOG.md` — Change history  
 
 ---
 
@@ -120,7 +120,7 @@ This repository includes a reference validation test that verifies:
 To run the validation locally:
 
 ```bash
-pip install pytest cbor2
+pip install pytest cbor2 git+https://github.com/Pale-Blue-Systems/PBS_LINK.git
 pytest -q
 ```
 
@@ -132,3 +132,11 @@ The validation test consumes the worked example reference code and confirms that
 
 This repository represents a **minimum viable reference** for the PBS Edge Adapter concept.  
 It is published to support technical clarity, review, and discussion as PBS standards evolve.
+
+The current PBS-to-BPv7 mapping profile in the protocol specifications is [`PBS-DTN-MAP-02`](https://github.com/Pale-Blue-Systems/PBS-PROTOCOL-OPEN/blob/main/PBS-RFC-LIB/PBS-DTN-MAP-02.md) (PBS v1.4).
+
+---
+
+## License
+
+Apache License 2.0. See [`LICENSE`](LICENSE).

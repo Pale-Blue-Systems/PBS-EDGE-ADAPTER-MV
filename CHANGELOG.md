@@ -18,6 +18,11 @@ documentation, specifications, and illustrative artifacts rather than production
 - Configuration Schema Appendix defining authoritative adapter configuration inputs.
 - Worked example reference code demonstrating PBS envelope encapsulation into a BPv7 bundle.
 - Validation test verifying BPv7 bundle structure, Primary Block CRC32C correctness, and payload integrity.
+- Apache License 2.0 (`LICENSE`).
+
+### Fixed
+- Worked example and validation test import `PBS_LINK`, the package name PBS_LINK actually installs; `pbs_link` failed to import on case-sensitive systems, so `pytest -q` stopped at collection.
+- README repository structure lists the directories that exist.
 - Instructions for running validation tests.
 
 ---
