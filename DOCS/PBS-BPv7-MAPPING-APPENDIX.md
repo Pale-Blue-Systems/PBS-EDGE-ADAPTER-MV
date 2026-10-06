@@ -58,7 +58,7 @@ The bundle is a CBOR indefinite-length array: the primary block, the payload blo
 | Bundle processing control flags | 0; 0x04 (bundle must not be fragmented) when the source is the null endpoint | 4.2.3 |
 | CRC type | 2 (CRC32C) | 4.2.1 |
 | Destination EID | Authority Context `dest` | 4.3.1 |
-| Source node ID | Authority Context `src` (Section A.5.3) | 4.2.5.1.1, 4.2.5.1.2, 4.2.5.2, 4.3.1 |
+| Source node ID | Authority Context `src` (Section A.5.3) | 4.2.5.1.1, 4.2.5.2, 4.3.1; RFC 9758 Section 5.3 |
 | Report-to EID | Authority Context `report_to` | 4.3.1 |
 | Creation timestamp | [DTN time in ms, sequence number] (Section A.6.1) | 4.2.6, 4.2.7 |
 | Lifetime | Section A.6.2, milliseconds | 4.3.1 |
@@ -84,15 +84,15 @@ The Authority Context map is adapter configuration (`AuthorityContextMap` in the
 
 ### A.5.3 Source Node ID
 
-The primary block's source field identifies the node at which the bundle was initially transmitted, or holds the null endpoint ID for an anonymous bundle (RFC 9171 Section 4.3.1). RFC 9171 Section 4.2.5.2 allows the EID of any singleton endpoint to serve as a node ID. Section 4.2.5.1.1 states that no dtn EID with a non-empty demux may do so; the adapter applies Section 4.2.5.2. RFC 9758 Section 5.3, which updates RFC 9171, allows any ipn EID of a node as the source node ID of bundles that node creates.
+The primary block's source field identifies the node at which the bundle was initially transmitted, or holds the null endpoint ID for an anonymous bundle (RFC 9171 Section 4.3.1). For the dtn scheme, RFC 9171 Section 4.2.5.1.1 states: "A dtn-scheme endpoint ID for which the demux is of length zero MAY identify the administrative endpoint for the node identified by node-name, and as such may serve as a node ID. No dtn-scheme endpoint ID for which the demux is of non-zero length may do so." For the ipn scheme, RFC 9758 Section 5.3, which updates RFC 9171, allows any ipn EID of a node as the source node ID of bundles that node creates.
 
-`src` is the EID of a singleton endpoint of the adapter's BP node, or the null endpoint. `AuthorityContextMap` accepts:
+`AuthorityContextMap` accepts as `src`:
 
 - `dtn:none` or `ipn:0.0`, the null endpoint (RFC 9171 Section 4.2.5.1.1; RFC 9758 Section 5.2);
-- a dtn EID `dtn://node-name/demux` with a non-empty node-name and a demux that does not begin with `~` (RFC 9171 Section 4.2.5.1.1);
-- an ipn EID other than `ipn:0.N` with N ≠ 0, which RFC 9758 Section 3.4.1 forbids composing.
+- a dtn EID `dtn://node-name/` with a non-empty node-name and an empty demux (RFC 9171 Section 4.2.5.1.1);
+- an ipn EID other than `ipn:0.N` with N ≠ 0, which RFC 9758 Section 3.4.1 forbids composing (RFC 9758 Section 5.3).
 
-It rejects any other `src` with `ValueError` when it is constructed. A dtn EID whose demux begins with `~` identifies a non-singleton endpoint and is rejected. The worked example uses the administrative endpoints `dtn://edge-17.pbsf.example/` and `ipn:4017.0`. The PBS-DTN-MAP-01 Section 8 example source EID `ipn:99.1` is accepted.
+A dtn src is accepted only with an empty demux (RFC 9171 Section 4.2.5.1.1). `AuthorityContextMap` rejects any other `src` with `ValueError` when it is constructed, including `dtn://pbsf.example/edge/node-17` and `dtn://pbsf.example/~ops`. The worked example uses the administrative endpoints `dtn://edge-17.pbsf.example/` and `ipn:4017.0`. The PBS-DTN-MAP-01 Section 8 example source EID `ipn:99.1` is accepted.
 
 When `src` is the null endpoint, the adapter sets bundle processing control flag 0x04, "bundle must not be fragmented", and sets no status report request flag (RFC 9171 Section 4.2.3).
 

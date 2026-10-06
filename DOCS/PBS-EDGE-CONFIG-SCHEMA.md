@@ -32,7 +32,7 @@ adapter:
 authority_contexts:
   <name>:
     dest: string          # BPv7 EID, dtn or ipn URI
-    src: string           # singleton-endpoint EID URI, "dtn:none" or "ipn:0.0"
+    src: string           # node ID URI: "dtn://node-name/", "ipn:node.service", "dtn:none" or "ipn:0.0"
     report_to: string     # BPv7 EID, dtn or ipn URI
 
 bundle:
@@ -76,7 +76,7 @@ authority_contexts:
 |-------|------|-------------|
 | `<name>` | string key | Authority context name, unique in this file |
 | `dest` | EID URI | Destination EID (RFC 9171 Section 4.3.1) |
-| `src` | EID URI | Source node ID: the EID of a singleton endpoint of the adapter's BP node (RFC 9171 Section 4.2.5.2; RFC 9758 Section 5.3), or the null endpoint `dtn:none` or `ipn:0.0`. A dtn EID whose demux begins with `~` identifies a non-singleton endpoint and is rejected. |
+| `src` | EID URI | Source node ID of the adapter's BP node, or the null endpoint `dtn:none` or `ipn:0.0`. A dtn src is accepted only with an empty demux (RFC 9171 Section 4.2.5.1.1). An ipn `src` is accepted with any service number (RFC 9758 Section 5.3), except `ipn:0.N` with N ≠ 0 (RFC 9758 Section 3.4.1). |
 | `report_to` | EID URI | Report-to EID (RFC 9171 Section 4.3.1) |
 
 EID URIs use the dtn scheme (`dtn://node-name/demux` or `dtn:none`) or the ipn scheme (`ipn:node.service`), encoded in the bundle as RFC 9171 Section 4.2.5.1 specifies. No envelope field enters any EID. [PBS-AUTHORITY-CONTEXT](PBS-AUTHORITY-CONTEXT.md) defines the Authority Context.
@@ -116,7 +116,7 @@ A valid configuration has:
 
 - at least one entry under `authority_contexts`;
 - `dest`, `src` and `report_to` in every entry;
-- as every `src`, the EID of a singleton endpoint of the adapter's BP node or the null endpoint (Section B.4);
+- as every `src`, a source node ID that Section B.4 accepts;
 - a positive integer `bundle.default_lifetime_ms`.
 
 The worked example enforces the second and third rules when `AuthorityContextMap` is constructed, and the fourth when it selects a lifetime.

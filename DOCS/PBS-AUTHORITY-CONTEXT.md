@@ -19,7 +19,7 @@ An Authority Context is a named entry in the adapter configuration. It holds thr
 | Field | Content | RFC 9171 |
 |-------|---------|----------|
 | `dest` | Destination EID of every bundle built under this context | 4.3.1 |
-| `src` | Source node ID: the EID of a singleton endpoint of the adapter's BP node, or the null endpoint (`dtn:none`, `ipn:0.0`) | 4.2.5.1.1, 4.2.5.1.2, 4.2.5.2, 4.3.1 |
+| `src` | Source node ID: a node ID of the adapter's BP node (a dtn EID with an empty demux, or an ipn EID), or the null endpoint (`dtn:none`, `ipn:0.0`) | 4.2.5.1.1, 4.2.5.2, 4.3.1; RFC 9758 Section 5.3 |
 | `report_to` | Report-to EID for bundle status reports | 4.3.1 |
 
 The name is a string unique within the adapter configuration, for example `pbsf.luna.ops`.
@@ -54,7 +54,7 @@ The adapter configuration holds a map of Authority Contexts. Each envelope is en
 `AuthorityContextMap` validates the map when it is constructed:
 
 - Each entry has `dest`, `src` and `report_to`. A missing field raises `ValueError`.
-- Each `src` is a node ID: the EID of a singleton endpoint of the adapter's BP node (RFC 9171 Section 4.2.5.2; RFC 9758 Section 5.3), or the null endpoint `dtn:none` or `ipn:0.0`. A dtn EID whose demux begins with `~` identifies a non-singleton endpoint and is rejected. `ipn:0.N` with N ≠ 0 is rejected (RFC 9758 Section 3.4.1). Any rejected `src` raises `ValueError`. [PBS-BPv7-MAPPING-APPENDIX](PBS-BPv7-MAPPING-APPENDIX.md) Section A.5.3 states the rule and the RFC 9171 text it resolves.
+- Each `src` is a node ID of the adapter's BP node, or the null endpoint `dtn:none` or `ipn:0.0`. A dtn src is accepted only with an empty demux (RFC 9171 Section 4.2.5.1.1), for example `dtn://edge-17.pbsf.example/`. An ipn `src` is accepted with any service number (RFC 9758 Section 5.3), except `ipn:0.N` with N ≠ 0 (RFC 9758 Section 3.4.1). Any other `src` raises `ValueError`. [PBS-BPv7-MAPPING-APPENDIX](PBS-BPv7-MAPPING-APPENDIX.md) Section A.5.3 states the rule and the RFC text it applies.
 
 Resolving a name absent from the map raises `KeyError`.
 

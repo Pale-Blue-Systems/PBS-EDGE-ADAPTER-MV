@@ -123,18 +123,15 @@ def is_source_node_id(eid: EID) -> bool:
     Accepted:
       - the null endpoint, dtn:none or ipn:0.0 (RFC 9171 Section 4.3.1;
         RFC 9758 Section 5.2);
-      - a dtn EID "dtn://node-name/demux" with a non-empty node-name and a
-        demux that does not begin with "~", which identifies a singleton
-        endpoint (RFC 9171 Section 4.2.5.1.1);
-      - an ipn EID [2, [node, service]] of non-negative integers (RFC 9171
-        Section 4.2.5.1.2; RFC 9758 Section 5.3).
-    Rejected: a dtn EID whose demux begins with "~" (not a singleton
-    endpoint), a dtn EID without the "/" after node-name, ipn:0.N with N
+      - a dtn EID "dtn://node-name/" with a non-empty node-name and an
+        empty demux (RFC 9171 Section 4.2.5.1.1);
+      - an ipn EID [2, [node, service]] of non-negative integers (RFC 9758
+        Section 5.3).
+    Rejected: a dtn EID with a non-empty demux (RFC 9171 Section 4.2.5.1.1:
+    "No dtn-scheme endpoint ID for which the demux is of non-zero length
+    may do so"), a dtn EID without the "/" after node-name, ipn:0.N with N
     non-zero (RFC 9758 Section 3.4.1: MUST NOT be composed), and anything else.
 
-    RFC 9171 Section 4.2.5.2 allows the EID of any singleton endpoint to
-    serve as a node ID. Section 4.2.5.1.1 states that no dtn EID with a
-    non-empty demux may do so; this example applies Section 4.2.5.2.
     RFC 9758 Section 5.3, which updates RFC 9171, allows any ipn EID of the
     node as the source node ID of bundles the node creates.
     """
@@ -147,7 +144,7 @@ def is_source_node_id(eid: EID) -> bool:
         if not isinstance(ssp, str) or not ssp.startswith("//"):
             return False
         node_name, delim, demux = ssp[2:].partition("/")
-        return bool(node_name) and delim == "/" and not demux.startswith("~")
+        return bool(node_name) and delim == "/" and demux == ""
     if scheme == 2:
         if not (isinstance(ssp, list) and len(ssp) == 2):
             return False
@@ -181,9 +178,9 @@ class AuthorityContextMap:
                 raise ValueError(f"Authority context {name!r} lacks {sorted(missing)}")
             if not is_source_node_id(row["src"]):
                 raise ValueError(
-                    f"Authority context {name!r}: src {row['src']!r} is not a singleton "
-                    "endpoint or the null endpoint (RFC 9171 Sections 4.2.5.1.1, "
-                    "4.2.5.2; RFC 9758 Sections 3.4.1, 5.3)"
+                    f"Authority context {name!r}: src {row['src']!r} is not the null "
+                    "endpoint, a dtn EID with an empty demux or an ipn EID "
+                    "(RFC 9171 Section 4.2.5.1.1; RFC 9758 Sections 3.4.1, 5.3)"
                 )
 
     def resolve(self, authority_context: str) -> Tuple[EID, EID, EID]:

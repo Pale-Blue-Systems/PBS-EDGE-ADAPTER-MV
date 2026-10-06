@@ -332,7 +332,7 @@ def test_identical_inputs_give_identical_bundles():
 
 # -----------------------------
 # Authority Context map and source node ID (RFC 9171 Sections 4.2.3,
-# 4.2.5.1.1, 4.2.5.1.2, 4.2.5.2, 4.3.1; RFC 9758 Sections 3.4.1, 5.2, 5.3)
+# 4.2.5.1.1, 4.3.1; RFC 9758 Sections 3.4.1, 5.2, 5.3)
 # -----------------------------
 
 def test_unknown_authority_context_is_rejected():
@@ -345,13 +345,13 @@ def test_unknown_authority_context_is_rejected():
 @pytest.mark.parametrize(
     "eid, expected",
     [
-        (eid_dtn("//edge-17.pbsf.example/"), True),        # administrative endpoint
-        (eid_dtn("//pbsf.example/edge/node-17"), True),    # singleton (RFC 9171 Section 4.2.5.2)
+        (eid_dtn("//edge-17.pbsf.example/"), True),        # empty demux (RFC 9171 Section 4.2.5.1.1)
         (eid_ipn(4017, 0), True),                           # administrative endpoint
         (eid_ipn(4001, 99), True),                          # any ipn EID (RFC 9758 Section 5.3)
         (eid_dtn("none"), True),                            # null endpoint
         (eid_ipn(0, 0), True),                              # null endpoint (RFC 9758 Section 5.2)
-        (eid_dtn("//pbsf.example/~ops"), False),            # "~" demux: not a singleton
+        (eid_dtn("//pbsf.example/edge/node-17"), False),   # non-empty demux (RFC 9171 Section 4.2.5.1.1)
+        (eid_dtn("//pbsf.example/~ops"), False),            # non-empty demux, non-singleton endpoint
         (eid_dtn("//edge-17.pbsf.example"), False),         # no name delimiter
         (eid_ipn(0, 5), False),                             # RFC 9758 Section 3.4.1
         ([2, [4001]], False),                               # malformed ipn SSP
@@ -361,13 +361,14 @@ def test_source_node_id_rule(eid, expected):
     assert is_source_node_id(eid) is expected
 
 
-def test_map_rejects_source_that_is_not_a_singleton_endpoint():
+@pytest.mark.parametrize("bad_src", ["//pbsf.example/edge/node-17", "//pbsf.example/~ops"])
+def test_map_rejects_dtn_source_with_non_empty_demux(bad_src):
     with pytest.raises(ValueError):
         AuthorityContextMap(
             table={
                 "bad": {
                     "dest": eid_dtn("//pbsf.example/luna/ops"),
-                    "src": eid_dtn("//pbsf.example/~ops"),
+                    "src": eid_dtn(bad_src),
                     "report_to": eid_dtn("//pbsf.example/ops/reports"),
                 }
             }

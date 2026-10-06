@@ -20,7 +20,7 @@ No PBS edge adapter product is published. The worked example builds bundle bytes
 | Map one envelope to exactly one bundle | PBS-DTN-MAP-01 Section 5.1; PBS-DTN-MAP-02 Section 2 |
 | Place the entire envelope (header and payload) in a single payload block, unmodified, header CRC32 preserved | PBS-DTN-MAP-01 Sections 6.2, 6.4 |
 | Set the lifetime to the configured default for TTL 0, otherwise min(default, TTL × 1000 − age in ms) | PBS-DTN-MAP-02 Section 4 |
-| Take the destination EID, source node ID and report-to EID from the Authority Context map; accept as source a singleton-endpoint EID or the null endpoint | PBS-DTN-MAP-01 Section 6.1 (Destination EID row) and Section 8 (destination EIDs configured at the gateway); RFC 9171 Section 4.2.5.2; RFC 9758 Section 5.3 |
+| Take the destination EID, source node ID and report-to EID from the Authority Context map; accept as source the null endpoint, a dtn EID with an empty demux, or an ipn EID | PBS-DTN-MAP-01 Section 6.1 (Destination EID row) and Section 8 (destination EIDs configured at the gateway); RFC 9171 Section 4.2.5.1.1; RFC 9758 Sections 3.4.1, 5.3 |
 | Write the creation time as DTN time in milliseconds since 2000-01-01T00:00:00Z | RFC 9171 Sections 4.2.6, 4.2.7 |
 | Set processing control flags 0, or 0x04 (bundle must not be fragmented) when the source is the null endpoint | RFC 9171 Section 4.2.3 |
 | Encode the bundle in CBOR with a CRC32C primary block and a CRC-type-0 payload block | RFC 9171 Sections 4.1, 4.2.1, 4.2.2, 4.3.1, 4.3.2 |
@@ -33,14 +33,14 @@ PBS-DTN-MAP-01 (v1.3) and PBS-DTN-MAP-02 (v1.4) are both optional interoperabili
 
 ## What the Tests Verify
 
-`TESTS/test_pbs_edge_adapter_worked_example_validation.py` (52 tests) builds envelopes with PBS_LINK at a fixed Timestamp and injects the adapter clock, so every value checked is exact:
+`TESTS/test_pbs_edge_adapter_worked_example_validation.py` (53 tests) builds envelopes with PBS_LINK at a fixed Timestamp and injects the adapter clock, so every value checked is exact:
 
 - **Bundle structure:** CBOR indefinite-length array; primary block of 9 items with version 7, CRC type 2 and the configured EIDs; processing control flags 0, and 0x04 for a `dtn:none` or `ipn:0.0` source; payload block `[1, 1, 0, 0, envelope]`.
 - **CRC32C:** the primary block CRC recomputes correctly, and `crc32c` reproduces the five CRC32C examples of RFC 7143 Appendix A.4, to which RFC 9171 Section 4.2.1 refers.
 - **Creation time:** DTN milliseconds; a clock of 2026-01-01T00:00:01.234567Z gives 820 540 801 234 ms. The DTN epoch is Unix time 946 684 800 000 ms.
 - **Lifetime:** TTL 0 gives the default; a TTL below the default gives the TTL, and one above it gives the default; a partially aged envelope gives the remaining TTL (17 499 ms at TTL 30 s, age 12.5005 s); a Timestamp 1 h ahead of the adapter clock gives the TTL (30 000 ms); creation time + lifetime never exceeds the envelope's Timestamp + TTL.
-- **Rejections:** expired envelopes, less than 1 ms of TTL left, a corrupted header (Source ID, Timestamp, TTL or CRC32 byte), trailing or missing bytes, unknown authority context, a source EID that is not a singleton endpoint, a negative sequence number, a non-positive default lifetime.
-- **Source EID rule:** administrative endpoints, `dtn://pbsf.example/edge/node-17`, `ipn:4001.99`, the PBS-DTN-MAP-01 Section 8 example `ipn:99.1` and both null endpoints are accepted; `dtn://pbsf.example/~ops` and `ipn:0.5` are rejected.
+- **Rejections:** expired envelopes, less than 1 ms of TTL left, a corrupted header (Source ID, Timestamp, TTL or CRC32 byte), trailing or missing bytes, unknown authority context, a source EID that cannot serve as a node ID, a negative sequence number, a non-positive default lifetime.
+- **Source EID rule:** a dtn src is accepted only with an empty demux (RFC 9171 Section 4.2.5.1.1). `dtn://edge-17.pbsf.example/`, `ipn:4017.0`, `ipn:4001.99`, the PBS-DTN-MAP-01 Section 8 example `ipn:99.1` and both null endpoints are accepted; `dtn://pbsf.example/edge/node-17`, `dtn://pbsf.example/~ops` and `ipn:0.5` are rejected.
 - **Envelope preservation:** payload block bytes equal the envelope bytes, for a 256-byte payload containing every byte value.
 - **Determinism:** identical inputs and clock reading give identical bundle bytes.
 
