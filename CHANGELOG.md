@@ -8,7 +8,22 @@ documentation, specifications, and illustrative artifacts rather than production
 
 ## [Unreleased]
 
-### Added
+### PBS v1.5.0 (2026-10-06)
+
+#### Fixed
+- Bundles created without a caller-supplied `creation_seq` all carried sequence number 1, so two bundles created in the same millisecond had the same creation timestamp (RFC 9171 Section 4.2.7). `CreationTimestampCounter` now assigns the sequence number: 0 for the first bundle in a later millisecond and one higher for each further bundle; it is not reset when the clock steps back. `pbs_to_bpv7_bundle_mv` takes `creation_seq=None` and `sequence_counter`, which defaults to `ADAPTER_SEQUENCE_COUNTER`. A supplied `creation_seq` is used as given and does not advance the counter. The envelope Sequence field is not read (PBS-DTN-MAP-01 v1.5 Section 6.1). The worked example run lets the counter assign the sequence number (was 42).
+
+#### Changed
+- `default_lifetime_ms` is the no-expiry lifetime of PBS-DTN-MAP-01 v1.5 Section 6.1.1 and PBS-DTN-MAP-02 v1.5 Section 4. `bundle_lifetime_ms` raises `ValueError` outside 1 to 4 294 967 295 000 ms; it raised only for 0 or less. The 60 000 ms default and min(default, remaining TTL) for TTL > 0 are unchanged and meet Sections 6.1 and 6.1.1.
+- `BPv7Primary` rejects bundle processing control flags that RFC 9171 Section 4.2.3 does not assign (`BPF_ASSIGNED_MASK`, 0x074067), including bits 7 and 8, which PBS-DTN-MAP-01 v1.5 Section 6.3 forbids for conveying priority. The adapter never set them.
+- README, WHY-NOW and `DOCS/` cite PBS-ENV-01, PBS-DTN-MAP-01 and PBS-DTN-MAP-02 v1.5 (PBS v1.5.0). For TTL 0 they cite PBS-DTN-MAP-01 Section 6.1.1 and PBS-DTN-MAP-02 Section 4 in place of the statement that no PBS mapping defines the lifetime; Appendix B Section B.5 gives the 4294967295000 ms bound and the bundle protocol agent overflow condition, which the worked example does not check. Appendix A states that the worked example is not a bundle protocol agent and how it assigns the creation timestamp (Section A.6.1), that Priority and Sequence map to no primary block field and no reserved flag is set (Section A.6.3), and that TTL is not modified (PBS-ENV-01 Sections 12.3 and 15; PBS-DTN-MAP-01 Section 7.3), in place of the statement that PBS-ENV-01 Section 15 requires TTL decrement.
+
+#### Added
+- 17 tests, 72 in total: the no-expiry lifetime bound (4 294 967 295 000 ms accepted, 4 294 967 296 000 ms rejected); the TTL 0 lifetime not less than the lifetime for any TTL from 1 s to 4 294 967 295 s; processing control flag bits 7 and 8 clear for priorities 0 to 4, with the Priority byte kept in the envelope; flags 0x80, 0x100, 0x180, 0x08 and 0x200000 rejected; sequence numbers 0, 1, 2 for three bundles in one millisecond and 0 in the next; different creation timestamps from the adapter counter; a caller-supplied `creation_seq` used as given.
+
+### Before PBS v1.5.0
+
+#### Added
 - Initial repository structure for the PBS Edge Adapter Minimum Viable Reference.
 - README: clauses implemented, tests, run instructions.
 - PBS Edge Adapter reference specification (`PBS-EDGE-ADAPTER-MV`).
@@ -24,7 +39,7 @@ documentation, specifications, and illustrative artifacts rather than production
 - `pytest.ini` (`testpaths = TESTS`, `pythonpath = .`).
 - CI workflow `.github/workflows/tests.yml`: on push and pull request, ubuntu-latest, Python 3.10, 3.11 and 3.12; installs pytest, cbor2 and PBS_LINK, runs `pytest -q` and the worked example. README badge.
 
-### Changed
+#### Changed
 - Bundle lifetime follows PBS-DTN-MAP-02 Section 4: min(configured default, TTL × 1000 − envelope age in ms, age rounded up and taken as 0 when the Timestamp is ahead of the adapter clock); TTL 0 uses the configured default. It was the configured value regardless of the TTL. Neither PBS-DTN-MAP-01 nor PBS-DTN-MAP-02 defines the lifetime for TTL 0; Appendix A Section A.6.2 and Appendix B Section B.5 state this and that the bundle protocol agent deletes the bundle, and the envelope with it, when that lifetime ends (RFC 9171 Section 5.5; PBS-DTN-MAP-01 Section 7.3). `pbs_to_bpv7_bundle_mv` takes `default_lifetime_ms` (was `lifetime_ms`) and `clock_us`, a callable returning Unix time in microseconds, read once for both the creation time and the envelope age.
 - `AuthorityContextMap` rejects an entry that lacks `dest`, `src` or `report_to`, or whose `src` cannot serve as a source node ID. It accepts `dtn:none` and `ipn:0.0`; a dtn src only with an empty demux (RFC 9171 Section 4.2.5.1.1); and an ipn `src` with any service number, except `ipn:0.N` with N ≠ 0, the LocalNode node number 4294967295 and node numbers of 2^32 or more (RFC 9758 Sections 3.4.1, 5.3, 5.4, 9.2).
 - The example ipn source EID is the administrative endpoint `ipn:4017.0` (was `ipn:4001.99`).
@@ -32,7 +47,7 @@ documentation, specifications, and illustrative artifacts rather than production
 - `DOCS/` describe the PBS-ENV-01 v1.3 header and the code: the Authority Context is a map of named entries selected per envelope; it is distinct from the PBS-AUTH-01 payload frame; the adapter performs no routing (PBS-DTN-MAP-02 Section 8); the configuration schema uses `default_lifetime_ms` and reserves the interface keys; the architecture diagrams mark the components the worked example does not implement. Appendix A states the source EID rule and the RFC 9171 Section 4.2.5.1.1 text it applies (Section A.5.3), the DTN time offset and its 5 s leap-second difference (Section A.6.1), the check order relative to PBS-ENV-01 Section 14 (Section A.3), the PBS-ENV-01 Section 15 TTL decrement the adapter does not perform (Section A.6.2), and that PBS-ADDR-01 payload addresses are not mapped to EIDs (Section A.5.1).
 - README states the clauses the worked example implements and what the tests verify. README, `DOCS/PBS-EDGE-ADAPTER-MV.md` and WHY-NOW cite LNIS V005 (NASA, ESA and JAXA, 29 January 2025); WHY-NOW also cites NASA *2026 Civil Space Shortfalls* need statement 15.01 and the *FY26 Civil Space Shortfall Prioritization* that PBS-TRACE-NASA-FY26-01 cites, in place of general statements about future operations.
 
-### Fixed
+#### Fixed
 - Bundle creation time was written in seconds since 2000-01-01, and the code comment said RFC 9171 DTN time is seconds. RFC 9171 Section 4.2.6 defines DTN time in milliseconds. Read as milliseconds, a 2026-10-06 creation time of 844 575 531 falls on 2000-01-10, so creation time + lifetime had passed and a bundle protocol agent treats the bundle as expired. Creation time is now Unix time in ms − 946 684 800 000.
 - `pytest -q` from a clean checkout failed at collection with `ModuleNotFoundError: No module named 'pbs_edge_adapter_worked_example'`; `pytest.ini` puts the repository root on the import path.
 - The example dtn source EID was `dtn://pbsf.example/edge/node-17`. Its demux is non-empty, and RFC 9171 Section 4.2.5.1.1 states that no such dtn EID may serve as a node ID. The example now uses the administrative endpoint `dtn://edge-17.pbsf.example/`, and `AuthorityContextMap` rejects a dtn `src` with a non-empty demux.
