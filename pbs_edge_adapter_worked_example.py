@@ -26,14 +26,14 @@ import os
 # pip install cbor2
 import cbor2
 
-# Add sibling directory to path to import pbs_link if not installed
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../PBS-LINK")))
+# Add sibling directory to path to import PBS_LINK if not installed
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../PBS_LINK")))
 
 try:
-    from pbs_link import PBSLink, build_envelope
+    from PBS_LINK import PBSLink, build_envelope
 except ImportError:
     # If pbs-link is not installed or found, defining a mock for syntax checking or local execution without it
-    print("WARNING: pbs_link not found. Ensure PBS-LINK is installed or in PYTHONPATH.")
+    print("WARNING: PBS_LINK not found. Ensure PBS_LINK is installed or in PYTHONPATH.")
     # In a real environment, this should fail.
 
 

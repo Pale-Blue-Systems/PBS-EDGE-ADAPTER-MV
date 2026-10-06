@@ -4,10 +4,10 @@ import sys
 import os
 import pytest
 
-# Add sibling directory to path to import pbs_link
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../PBS-LINK")))
+# Add sibling directory to path to import PBS_LINK
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../PBS_LINK")))
 
-from pbs_link import build_envelope
+from PBS_LINK import build_envelope
 
 # Import from your worked example module
 from pbs_edge_adapter_worked_example import (
