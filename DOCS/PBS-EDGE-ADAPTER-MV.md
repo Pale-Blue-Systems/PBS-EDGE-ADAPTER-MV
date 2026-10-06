@@ -90,7 +90,7 @@ Identical envelope bytes, Authority Context entry, configured default lifetime, 
 
 A deployment requires a BPv7 bundle protocol agent that accepts bundles for forwarding and delivers received bundles to the adapter. The NASA/JPL Interplanetary Overlay Network (ION, <https://github.com/nasa-jpl/ION-DTN>) is one such agent; its `bpv7` module implements RFC 9171. The worked example produces bundle bytes and does not connect to an agent.
 
-The LunaNet Interoperability Specification, Version 5 (LNIS V005, NASA, 29 January 2025), Section 3.1.2, specifies BPv7 for LunaNet DTN network communications services.
+The LunaNet Interoperability Specification, Version 5 (LNIS V005, NASA, ESA and JAXA, 29 January 2025), Section 3.1.2, specifies BPv7 for LunaNet DTN network communications services.
 
 ---
 

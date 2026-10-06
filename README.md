@@ -83,7 +83,7 @@ The worked example prints the envelope header, the bundle in hex, the decoded pr
 
 - **PBS:** PBS-ENV-01 v1.3, PBS-DTN-MAP-01 v1.3 and PBS-DTN-MAP-02 v1.4. The current PBS release is PBS v1.4.1 (2026-10-06), an errata and documentation release of PBS v1.4 with no wire-format change.
 - **BPv7:** IETF RFC 9171, *Bundle Protocol Version 7*, <https://www.rfc-editor.org/rfc/rfc9171>.
-- **LunaNet:** LunaNet Interoperability Specification, Version 5 (LNIS V005, NASA, 29 January 2025), Section 3.1.2: "The Bundle Protocol version 7 (BPv7) shall be used" for DTN network communications services. <https://www.nasa.gov/wp-content/uploads/2025/02/lunanet-interoperability-specification-v5-baseline.pdf>
+- **LunaNet:** LunaNet Interoperability Specification, Version 5 (LNIS V005, NASA, ESA and JAXA, 29 January 2025), Section 3.1.2: "The Bundle Protocol version 7 (BPv7) shall be used" for DTN network communications services. <https://www.nasa.gov/wp-content/uploads/2025/02/lunanet-interoperability-specification-v5-baseline.pdf>
 
 ---
 
