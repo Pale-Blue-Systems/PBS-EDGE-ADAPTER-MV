@@ -6,6 +6,8 @@ This repository specifies the **Pale Blue Systems (PBS) Edge Adapter** and demon
 
 No PBS edge adapter product is published. The worked example builds bundle bytes; it does not connect to a bundle protocol agent.
 
+A deployment requires a BPv7 bundle protocol agent. The NASA/JPL Interplanetary Overlay Network (ION, <https://github.com/nasa-jpl/ION-DTN>) is one; its `bpv7` module implements RFC 9171. JPL's ION configuration tools are at <https://github.com/nasa-jpl/ion-config-tool>. Use the upstream repositories; Pale Blue Systems does not maintain forks of them.
+
 ---
 
 ## What the Worked Example Implements
