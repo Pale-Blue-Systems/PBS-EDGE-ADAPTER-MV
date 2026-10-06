@@ -59,12 +59,17 @@ def make_envelope(ttl: int, payload: bytes = b"VOLTAGE=120.0") -> bytes:
     return link.send(Priority.NORMAL, payload, ttl=ttl)
 
 
-def encapsulate(envelope_bytes: bytes, now_us: int, creation_seq: int = 42) -> bytes:
+def encapsulate(
+    envelope_bytes: bytes,
+    now_us: int,
+    creation_seq: int = 42,
+    default_lifetime_ms: int = DEFAULT_LIFETIME_MS,
+) -> bytes:
     return pbs_to_bpv7_bundle_mv(
         envelope_bytes,
         "pbsf.luna.ops",
         AC_MAP,
-        default_lifetime_ms=DEFAULT_LIFETIME_MS,
+        default_lifetime_ms=default_lifetime_ms,
         creation_seq=creation_seq,
         clock_us=lambda: now_us,
     )
@@ -214,11 +219,15 @@ def test_clock_at_or_before_dtn_epoch_is_rejected():
 
 
 # -----------------------------
-# Lifetime (PBS-DTN-MAP-02 Section 4; PBS-ENV-01 Section 12)
+# Lifetime (PBS-DTN-MAP-01 Sections 6.1 and 6.1.1; PBS-DTN-MAP-02 Section 4;
+# PBS-ENV-01 Section 12)
 # -----------------------------
 
-def lifetime_of(ttl: int, age_us: int) -> int:
-    return cbor2.loads(encapsulate(make_envelope(ttl), now_us=T0_US + age_us))[0][7]
+def lifetime_of(ttl: int, age_us: int, default_lifetime_ms: int = DEFAULT_LIFETIME_MS) -> int:
+    bundle = encapsulate(
+        make_envelope(ttl), now_us=T0_US + age_us, default_lifetime_ms=default_lifetime_ms
+    )
+    return cbor2.loads(bundle)[0][7]
 
 
 def test_ttl_zero_uses_configured_default():
@@ -270,6 +279,26 @@ def test_non_positive_default_lifetime_is_rejected(default_lifetime_ms):
             default_lifetime_ms=default_lifetime_ms,
             clock_us=lambda: T0_US,
         )
+
+
+def test_no_expiry_lifetime_is_at_most_4294967295000_ms():
+    # PBS-DTN-MAP-01 Section 6.1.1 and PBS-DTN-MAP-02 Section 4: the
+    # no-expiry lifetime does not exceed 4 294 967 295 000 ms, the largest
+    # TTL (4 294 967 295 s) in milliseconds.
+    assert lifetime_of(ttl=0, age_us=0, default_lifetime_ms=4_294_967_295_000) == 4_294_967_295_000
+    for ttl in (0, 30):
+        with pytest.raises(ValueError):
+            lifetime_of(ttl, age_us=0, default_lifetime_ms=4_294_967_296_000)
+
+
+@pytest.mark.parametrize("default_lifetime_ms", [1, DEFAULT_LIFETIME_MS, 4_294_967_295_000])
+def test_ttl_zero_lifetime_is_not_less_than_any_finite_ttl_lifetime(default_lifetime_ms):
+    # PBS-DTN-MAP-01 Section 6.1.1: the no-expiry lifetime is not less than
+    # the lifetime the gateway assigns to any envelope with TTL > 0.
+    ttl_zero_lifetime = lifetime_of(ttl=0, age_us=0, default_lifetime_ms=default_lifetime_ms)
+    for ttl in (1, 30, 3600, 86_400, 4_294_967_295):
+        for age_us in (-3_600_000_000, 0, 500_000):
+            assert lifetime_of(ttl, age_us, default_lifetime_ms) <= ttl_zero_lifetime
 
 
 @pytest.mark.parametrize("age_us", [0, 1, 999, 1_000, 12_500_500, 29_000_001, 29_999_000])

@@ -8,9 +8,10 @@ Bundle Protocol Version 7 bundle (IETF RFC 9171):
      byte other than 0x10, a header CRC32 mismatch, a reserved priority
      (5-255) and a payload shorter than the Size field (PBS-ENV-01 Sections
      13 and 14). Reject input longer than 44 + Size bytes.
-  2. Reject an envelope whose TTL has expired and bound the bundle lifetime
-     by the TTL that remains (PBS-ENV-01 Section 12; PBS-DTN-MAP-02
-     Section 4).
+  2. Reject an envelope whose TTL has expired or has less than 1 ms left.
+     Bound the bundle lifetime by the TTL that remains; for TTL 0 use the
+     configured no-expiry lifetime (PBS-ENV-01 Section 12; PBS-DTN-MAP-01
+     Sections 6.1 and 6.1.1; PBS-DTN-MAP-02 Section 4).
   3. Take the destination EID, source node ID and report-to EID from the
      Authority Context map entry named by the caller.
   4. Build the primary block (RFC 9171 Section 4.3.1): creation time in DTN
@@ -339,8 +340,14 @@ def unix_us_to_dtn_ms(unix_us: int) -> int:
 
 
 # -----------------------------
-# Lifetime (PBS-DTN-MAP-02 Section 4; PBS-ENV-01 Section 12)
+# Lifetime (PBS-DTN-MAP-01 Sections 6.1 and 6.1.1; PBS-DTN-MAP-02 Section 4;
+# PBS-ENV-01 Section 12)
 # -----------------------------
+
+# Largest no-expiry lifetime PBS-DTN-MAP-01 Section 6.1.1 and PBS-DTN-MAP-02
+# Section 4 permit: 4 294 967 295 000 ms, the largest TTL (2^32 - 1 s) in
+# milliseconds.
+MAX_NO_EXPIRY_LIFETIME_MS = 4_294_967_295_000
 
 class EdgeAdapterError(Exception):
     """An envelope this example refuses to encapsulate."""
@@ -352,7 +359,8 @@ class EnvelopeExpiredError(EdgeAdapterError):
 
     Raised when the envelope has expired (age > TTL, PBS-ENV-01 Section
     12.2), which gateways MUST discard (Sections 12.1 and 15), and when less
-    than 1 ms of the TTL remains.
+    than 1 ms of the TTL remains, which PBS-DTN-MAP-01 Section 6.1 forbids
+    encapsulating.
     """
 
 
@@ -362,27 +370,43 @@ class EnvelopeLengthError(EdgeAdapterError):
 
 def bundle_lifetime_ms(envelope: PBSEnvelope, now_us: int, default_lifetime_ms: int) -> int:
     """
-    Select the bundle lifetime per PBS-DTN-MAP-02 Section 4.
+    Select the bundle lifetime (PBS-DTN-MAP-01 Sections 6.1 and 6.1.1;
+    PBS-DTN-MAP-02 Section 4).
 
-    TTL 0: the envelope never expires (PBS-ENV-01 Section 12.1). Neither
-    PBS-DTN-MAP-01 nor PBS-DTN-MAP-02 defines a bundle lifetime for TTL 0;
-    return default_lifetime_ms. When the bundle's age exceeds it, the BP
-    agent deletes the bundle (RFC 9171 Section 5.5) and the envelope is
-    discarded with it (PBS-DTN-MAP-01 Section 7.3).
+    default_lifetime_ms is the no-expiry lifetime: an integer from 1 to
+    4_294_967_295_000 ms (PBS-DTN-MAP-01 Section 6.1.1). A deployment also
+    selects a value that its bundle protocol agent accepts and for which
+    the agent computes creation time + lifetime without overflow (Section
+    6.1.1); this example connects to no agent and does not check that.
+
+    TTL 0: the envelope never expires (PBS-ENV-01 Section 12.1). This
+    example reads no Service Intent frame and no mission expiry policy, so
+    no PBS-DTN-MAP-02 Section 4 finite limit applies; return
+    default_lifetime_ms (PBS-DTN-MAP-01 Section 6.1.1). When the bundle's
+    age exceeds it, the BP agent deletes the bundle (RFC 9171 Section 5.5)
+    and the envelope with it. That deletion is not TTL expiry
+    (PBS-DTN-MAP-01 Sections 6.1.1 and 7.3).
 
     TTL > 0: the envelope expires at Timestamp + TTL (PBS-ENV-01 Section
     12.2). Return min(default_lifetime_ms, remaining_ms), where
-      remaining_ms = TTL * 1000 - age_ms
-      age_ms       = max(0, now_us - Timestamp) in milliseconds, rounded up.
-    Rounding the age up keeps creation time + lifetime at or before the PBS
-    expiry instant when both are taken from now_us. A Timestamp later than
-    now_us gives age 0, so the lifetime never exceeds TTL * 1000.
+      remaining_ms = (TTL * 1_000_000 - age_us) // 1000
+      age_us       = max(0, now_us - Timestamp)
+    This is the PBS-DTN-MAP-01 Section 6.1 bound computed with now_us in
+    place of the creation time: the creation time is now_us truncated to
+    whole milliseconds, so it is not later than now_us and the bundle
+    expires no later than the envelope. A Timestamp later than now_us
+    gives age 0, so the lifetime never exceeds TTL * 1000. The result never
+    exceeds default_lifetime_ms, the TTL 0 lifetime (Section 6.1.1).
 
-    Raises EnvelopeExpiredError if remaining_ms <= 0, and ValueError if
-    default_lifetime_ms <= 0.
+    Raises EnvelopeExpiredError if remaining_ms < 1 (PBS-DTN-MAP-01
+    Section 6.1), and ValueError if default_lifetime_ms is outside
+    1..4_294_967_295_000.
     """
-    if default_lifetime_ms <= 0:
-        raise ValueError("default_lifetime_ms must be positive")
+    if not 1 <= default_lifetime_ms <= MAX_NO_EXPIRY_LIFETIME_MS:
+        raise ValueError(
+            f"default_lifetime_ms must be 1 to {MAX_NO_EXPIRY_LIFETIME_MS} ms "
+            "(PBS-DTN-MAP-01 Section 6.1.1)"
+        )
     if envelope.ttl == 0:
         return default_lifetime_ms
 
@@ -418,8 +442,9 @@ def pbs_to_bpv7_bundle_mv(
     pbs_envelope_bytes   complete envelope: 44-byte header + Size payload bytes
     authority_context    name of the Authority Context map entry to use
     authority_map        Authority Context map (adapter configuration)
-    default_lifetime_ms  configured bundle lifetime, used when TTL is 0 and as
-                         the upper bound otherwise
+    default_lifetime_ms  no-expiry lifetime, 1 to 4_294_967_295_000 ms: the
+                         bundle lifetime when TTL is 0 and the upper bound
+                         otherwise (PBS-DTN-MAP-01 Section 6.1.1)
     creation_seq         creation timestamp sequence number, a non-negative
                          integer (RFC 9171 Section 4.2.7); a BP agent supplies
                          it from its own counter
@@ -433,8 +458,8 @@ def pbs_to_bpv7_bundle_mv(
     PBSCRCError, PBSPriorityError) for an invalid or truncated envelope,
     EnvelopeLengthError for trailing bytes, EnvelopeExpiredError, KeyError
     for an unknown authority context, and ValueError for a negative
-    creation_seq, a non-positive default_lifetime_ms, or a clock reading at
-    or before the DTN epoch.
+    creation_seq, a default_lifetime_ms outside 1..4_294_967_295_000, or a
+    clock reading at or before the DTN epoch.
     """
     if creation_seq < 0:
         raise ValueError("creation_seq must be a non-negative integer (RFC 9171 Section 4.2.7)")
