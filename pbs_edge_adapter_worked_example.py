@@ -125,12 +125,16 @@ def is_source_node_id(eid: EID) -> bool:
         RFC 9758 Section 5.2);
       - a dtn EID "dtn://node-name/" with a non-empty node-name and an
         empty demux (RFC 9171 Section 4.2.5.1.1);
-      - an ipn EID [2, [node, service]] of non-negative integers (RFC 9758
-        Section 5.3).
+      - an ipn EID [2, [node, service]] of non-negative integers with a node
+        number below 0xFFFFFFFF (RFC 9758 Section 5.3).
     Rejected: a dtn EID with a non-empty demux (RFC 9171 Section 4.2.5.1.1:
     "No dtn-scheme endpoint ID for which the demux is of non-zero length
     may do so"), a dtn EID without the "/" after node-name, ipn:0.N with N
-    non-zero (RFC 9758 Section 3.4.1: MUST NOT be composed), and anything else.
+    non-zero (RFC 9758 Section 3.4.1: MUST NOT be composed), the LocalNode
+    node number 0xFFFFFFFF (RFC 9758 Section 5.4: a bundle with a LocalNode
+    source MUST NOT leave the local node), a node number of 2^32 or more
+    (invalid for the default allocator, RFC 9758 Section 9.2), and anything
+    else.
 
     RFC 9758 Section 5.3, which updates RFC 9171, allows any ipn EID of the
     node as the source node ID of bundles the node creates.
@@ -150,6 +154,8 @@ def is_source_node_id(eid: EID) -> bool:
             return False
         node, service = ssp
         if not all(isinstance(n, int) and not isinstance(n, bool) and n >= 0 for n in ssp):
+            return False
+        if node >= 0xFFFFFFFF:
             return False
         return node != 0 or service == 0
     return False

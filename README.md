@@ -17,7 +17,7 @@ No PBS edge adapter product is published. The worked example builds bundle bytes
 | Parse the envelope with PBS_LINK; reject a bad magic byte, a header CRC32 mismatch, a reserved priority (5–255) or a short payload | PBS-ENV-01 v1.3 Sections 13, 14 |
 | Reject input longer than the 44-byte header plus `Size` | PBS-DTN-MAP-01 Sections 5.1, 6.2 (one envelope per payload block) |
 | Reject an expired envelope | PBS-ENV-01 Sections 12.1, 12.2, 15 |
-| Map one envelope to exactly one bundle | PBS-DTN-MAP-01 Section 5.1; PBS-DTN-MAP-02 Section 2 |
+| Map one envelope to exactly one bundle | PBS-DTN-MAP-01 Section 5.1 (SHALL); PBS-DTN-MAP-02 Section 2 (one PDU SHOULD map to one BP ADU) |
 | Place the entire envelope (header and payload) in a single payload block, unmodified, header CRC32 preserved | PBS-DTN-MAP-01 Sections 6.2, 6.4 |
 | Set the lifetime to min(default, TTL × 1000 − age in ms); for TTL 0, which neither PBS-DTN-MAP-01 nor PBS-DTN-MAP-02 covers, use the configured default | PBS-DTN-MAP-02 Section 4; [Appendix A, Section A.6.2](DOCS/PBS-BPv7-MAPPING-APPENDIX.md) |
 | Take the destination EID, source node ID and report-to EID from the Authority Context map; accept as source the null endpoint, a dtn EID with an empty demux, or an ipn EID | PBS-DTN-MAP-01 Section 6.1 (Destination EID row) and Section 8 (destination EIDs configured at the gateway); RFC 9171 Section 4.2.5.1.1; RFC 9758 Sections 3.4.1, 5.3 |
@@ -33,7 +33,7 @@ PBS-DTN-MAP-01 (v1.3) and PBS-DTN-MAP-02 (v1.4) are both optional interoperabili
 
 ## What the Tests Verify
 
-`TESTS/test_pbs_edge_adapter_worked_example_validation.py` (53 tests) builds envelopes with PBS_LINK at a fixed Timestamp and injects the adapter clock, so every value checked is exact:
+`TESTS/test_pbs_edge_adapter_worked_example_validation.py` (55 tests) builds envelopes with PBS_LINK at a fixed Timestamp and injects the adapter clock, so every value checked is exact:
 
 - **Bundle structure:** CBOR indefinite-length array; primary block of 9 items with version 7, CRC type 2 and the configured EIDs; processing control flags 0, and 0x04 for a `dtn:none` or `ipn:0.0` source; payload block `[1, 1, 0, 0, envelope]`.
 - **CRC32C:** the primary block CRC recomputes correctly, and `crc32c` reproduces the five CRC32C examples of RFC 7143 Appendix A.4, to which RFC 9171 Section 4.2.1 refers.
@@ -56,7 +56,7 @@ pytest -q
 python pbs_edge_adapter_worked_example.py
 ```
 
-[PBS_LINK](https://github.com/Pale-Blue-Systems/PBS_LINK) is the PBS reference SDK (pip distribution `pbs-link` 0.1.1; import package `PBS_LINK`). It implements PBS-ENV-01 v1.3, including the header CRC32 over bytes 0x00–0x2B with the CRC32 field set to zero.
+[PBS_LINK](https://github.com/Pale-Blue-Systems/PBS_LINK) is the PBS reference SDK (pip distribution `pbs-link` 0.1.2; import package `PBS_LINK`). It implements PBS-ENV-01 v1.3, including the header CRC32 over bytes 0x00–0x2B with the CRC32 field set to zero.
 
 The worked example prints the envelope header, the bundle in hex, the decoded primary block, the creation time as a UTC instant, and the lifetime. With a 120 s TTL and a 300 000 ms configured default, the lifetime is 120 000 ms minus the envelope's age at bundle creation, with the age rounded up to whole milliseconds.
 

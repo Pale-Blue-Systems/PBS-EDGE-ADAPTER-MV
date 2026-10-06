@@ -76,7 +76,7 @@ authority_contexts:
 |-------|------|-------------|
 | `<name>` | string key | Authority context name, unique in this file |
 | `dest` | EID URI | Destination EID (RFC 9171 Section 4.3.1) |
-| `src` | EID URI | Source node ID of the adapter's BP node, or the null endpoint `dtn:none` or `ipn:0.0`. A dtn src is accepted only with an empty demux (RFC 9171 Section 4.2.5.1.1). An ipn `src` is accepted with any service number (RFC 9758 Section 5.3), except `ipn:0.N` with N ≠ 0 (RFC 9758 Section 3.4.1). |
+| `src` | EID URI | Source node ID of the adapter's BP node, or the null endpoint `dtn:none` or `ipn:0.0`. A dtn src is accepted only with an empty demux (RFC 9171 Section 4.2.5.1.1). An ipn `src` is accepted with any service number (RFC 9758 Section 5.3), except `ipn:0.N` with N ≠ 0 (RFC 9758 Section 3.4.1), the LocalNode node number 4294967295 (Section 5.4) and node numbers of 2^32 or more (Section 9.2). |
 | `report_to` | EID URI | Report-to EID (RFC 9171 Section 4.3.1) |
 
 EID URIs use the dtn scheme (`dtn://node-name/demux` or `dtn:none`) or the ipn scheme (`ipn:node.service`), encoded in the bundle as RFC 9171 Section 4.2.5.1 specifies. No envelope field enters any EID. [PBS-AUTHORITY-CONTEXT](PBS-AUTHORITY-CONTEXT.md) defines the Authority Context.

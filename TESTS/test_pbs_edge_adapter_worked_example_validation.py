@@ -354,6 +354,8 @@ def test_unknown_authority_context_is_rejected():
         (eid_dtn("//pbsf.example/~ops"), False),            # non-empty demux, non-singleton endpoint
         (eid_dtn("//edge-17.pbsf.example"), False),         # no name delimiter
         (eid_ipn(0, 5), False),                             # RFC 9758 Section 3.4.1
+        (eid_ipn(0xFFFFFFFF, 1), False),                    # LocalNode (RFC 9758 Section 5.4)
+        (eid_ipn(2**32, 0), False),                         # invalid node number (RFC 9758 Section 9.2)
         ([2, [4001]], False),                               # malformed ipn SSP
     ],
 )

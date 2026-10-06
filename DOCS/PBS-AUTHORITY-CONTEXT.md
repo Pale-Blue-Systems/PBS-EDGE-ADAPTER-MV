@@ -54,7 +54,7 @@ The adapter configuration holds a map of Authority Contexts. Each envelope is en
 `AuthorityContextMap` validates the map when it is constructed:
 
 - Each entry has `dest`, `src` and `report_to`. A missing field raises `ValueError`.
-- Each `src` is a node ID of the adapter's BP node, or the null endpoint `dtn:none` or `ipn:0.0`. A dtn src is accepted only with an empty demux (RFC 9171 Section 4.2.5.1.1), for example `dtn://edge-17.pbsf.example/`. An ipn `src` is accepted with any service number (RFC 9758 Section 5.3), except `ipn:0.N` with N ≠ 0 (RFC 9758 Section 3.4.1). Any other `src` raises `ValueError`. [PBS-BPv7-MAPPING-APPENDIX](PBS-BPv7-MAPPING-APPENDIX.md) Section A.5.3 states the rule and the RFC text it applies.
+- Each `src` is a node ID of the adapter's BP node, or the null endpoint `dtn:none` or `ipn:0.0`. A dtn src is accepted only with an empty demux (RFC 9171 Section 4.2.5.1.1), for example `dtn://edge-17.pbsf.example/`. An ipn `src` is accepted with any service number (RFC 9758 Section 5.3), except `ipn:0.N` with N ≠ 0 (RFC 9758 Section 3.4.1), the LocalNode node number 4294967295 (Section 5.4) and node numbers of 2^32 or more (Section 9.2). RFC 9171 Section 4.2.5.2 states that the EID of any singleton endpoint may serve as a node ID; Section 4.2.5.1.1 excludes dtn-scheme EIDs with a non-empty demux. The adapter applies the Section 4.2.5.1.1 rule, so it rejects singleton dtn EIDs such as `dtn://pbsf.example/edge/node-17` that Section 4.2.5.2 alone would admit. Any other `src` raises `ValueError`. [PBS-BPv7-MAPPING-APPENDIX](PBS-BPv7-MAPPING-APPENDIX.md) Section A.5.3 states the rule and the RFC text it applies.
 
 Resolving a name absent from the map raises `KeyError`.
 

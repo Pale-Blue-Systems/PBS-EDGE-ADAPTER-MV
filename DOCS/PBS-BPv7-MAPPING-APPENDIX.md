@@ -16,7 +16,7 @@ PBS specifications are in [PBS-PROTOCOL-OPEN](https://github.com/Pale-Blue-Syste
 
 ## A.2 Mapping Principles
 
-1. **One envelope, one bundle.** Each envelope maps to exactly one bundle (PBS-DTN-MAP-01 Section 5.1; PBS-DTN-MAP-02 Section 2).
+1. **One envelope, one bundle.** Each envelope maps to exactly one bundle (PBS-DTN-MAP-01 Section 5.1). PBS-DTN-MAP-02 Section 2 states that one PBS protocol data unit SHOULD map to one BP application data unit.
 2. **Opaque envelope.** The complete envelope, 44-byte header and payload, is the payload block content, unmodified (PBS-DTN-MAP-01 Sections 6.2 and 6.4).
 3. **Configured addressing.** The destination EID, source node ID and report-to EID come from the Authority Context map (Section A.5).
 4. **Bounded lifetime.** For TTL > 0, the bundle lifetime ends no later than Timestamp + TTL and does not exceed TTL × 1000 ms (PBS-DTN-MAP-02 Section 4).
@@ -44,7 +44,7 @@ The adapter accepts a PBS-ENV-01 v1.3 envelope: a fixed 44-byte big-endian heade
 
 The header contains no destination, scope, authority or message identifier field, and no version field other than Magic. No header field contributes to a bundle EID. Every header byte and the payload travel unmodified in the payload block (Section A.7).
 
-`PBS_LINK.parse_envelope` (PBS_LINK 0.1.1) checks the 44-byte minimum length, magic, CRC32, priority and payload length, in that order. The adapter then checks the input length and the TTL. The payload-length check therefore precedes the TTL check; PBS-ENV-01 Section 14 lists TTL as step 4 and payload extraction as step 5. Either failure discards the envelope and produces no bundle; only the exception differs. Section A.10 lists the rejections.
+`PBS_LINK.parse_envelope` (PBS_LINK 0.1.2) checks the 44-byte minimum length, magic, CRC32, priority and payload length, in that order. The adapter then checks the input length and the TTL. The payload-length check therefore precedes the TTL check; PBS-ENV-01 Section 14 lists TTL as step 4 and payload extraction as step 5. Either failure discards the envelope and produces no bundle; only the exception differs. Section A.10 lists the rejections.
 
 ---
 
@@ -84,13 +84,13 @@ The Authority Context map is adapter configuration (`AuthorityContextMap` in the
 
 ### A.5.3 Source Node ID
 
-The primary block's source field identifies the node at which the bundle was initially transmitted, or holds the null endpoint ID for an anonymous bundle (RFC 9171 Section 4.3.1). For the dtn scheme, RFC 9171 Section 4.2.5.1.1 states: "A dtn-scheme endpoint ID for which the demux is of length zero MAY identify the administrative endpoint for the node identified by node-name, and as such may serve as a node ID. No dtn-scheme endpoint ID for which the demux is of non-zero length may do so." For the ipn scheme, RFC 9758 Section 5.3, which updates RFC 9171, allows any ipn EID of a node as the source node ID of bundles that node creates.
+The primary block's source field identifies the node at which the bundle was initially transmitted, or holds the null endpoint ID for an anonymous bundle (RFC 9171 Section 4.3.1). For the dtn scheme, RFC 9171 Section 4.2.5.1.1 states: "A dtn-scheme endpoint ID for which the demux is of length zero MAY identify the administrative endpoint for the node identified by node-name, and as such may serve as a node ID. No dtn-scheme endpoint ID for which the demux is of non-zero length may do so." RFC 9171 Section 4.2.5.2 states that the EID of any singleton endpoint may serve as a node ID; Section 4.2.5.1.1 excludes dtn-scheme EIDs with a non-empty demux. The adapter applies the Section 4.2.5.1.1 rule, so it rejects singleton dtn EIDs such as `dtn://pbsf.example/edge/node-17` that Section 4.2.5.2 alone would admit. For the ipn scheme, RFC 9758 Section 5.3, which updates RFC 9171, allows any ipn EID of a node as the source node ID of bundles that node creates.
 
 `AuthorityContextMap` accepts as `src`:
 
 - `dtn:none` or `ipn:0.0`, the null endpoint (RFC 9171 Section 4.2.5.1.1; RFC 9758 Section 5.2);
 - a dtn EID `dtn://node-name/` with a non-empty node-name and an empty demux (RFC 9171 Section 4.2.5.1.1);
-- an ipn EID other than `ipn:0.N` with N ≠ 0, which RFC 9758 Section 3.4.1 forbids composing (RFC 9758 Section 5.3).
+- an ipn EID other than `ipn:0.N` with N ≠ 0, which RFC 9758 Section 3.4.1 forbids composing, the LocalNode node number 4294967295 (RFC 9758 Section 5.4), or a node number of 2^32 or more, which RFC 9758 Section 9.2 marks invalid (RFC 9758 Section 5.3).
 
 A dtn src is accepted only with an empty demux (RFC 9171 Section 4.2.5.1.1). `AuthorityContextMap` rejects any other `src` with `ValueError` when it is constructed, including `dtn://pbsf.example/edge/node-17` and `dtn://pbsf.example/~ops`. The worked example uses the administrative endpoints `dtn://edge-17.pbsf.example/` and `ipn:4017.0`. The PBS-DTN-MAP-01 Section 8 example source EID `ipn:99.1` is accepted.
 
