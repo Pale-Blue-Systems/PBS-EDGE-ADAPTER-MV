@@ -15,8 +15,9 @@ Bundle Protocol Version 7 bundle (IETF RFC 9171):
   3. Take the destination EID, source node ID and report-to EID from the
      Authority Context map entry named by the caller.
   4. Build the primary block (RFC 9171 Section 4.3.1): creation time in DTN
-     milliseconds (Sections 4.2.6, 4.2.7) and a CRC32C (Sections 4.2.1,
-     4.2.2).
+     milliseconds (Sections 4.2.6, 4.2.7), a sequence number from the
+     adapter's CreationTimestampCounter unless the caller supplies one
+     (Section 4.2.7), and a CRC32C (Sections 4.2.1, 4.2.2).
   5. Place the complete envelope, header and payload, unmodified in the
      payload block (RFC 9171 Section 4.3.2; PBS-DTN-MAP-01 Section 6.2).
 
@@ -28,9 +29,10 @@ from __future__ import annotations
 
 import datetime
 import struct
+import threading
 import time
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Tuple, Union
+from typing import Any, Callable, Dict, Optional, Tuple, Union
 
 import cbor2
 from PBS_LINK import HEADER_SIZE, PBSEnvelope, Priority, build_envelope, parse_envelope
@@ -339,6 +341,48 @@ def unix_us_to_dtn_ms(unix_us: int) -> int:
     return dtn_ms
 
 
+class CreationTimestampCounter:
+    """
+    Creation timestamp sequence numbers for one adapter (RFC 9171 Section
+    4.2.7).
+
+    RFC 9171 Section 4.2.7 takes the sequence number from a monotonically
+    increasing counter managed by the source node's bundle protocol agent,
+    which "MAY be reset to zero whenever the current time advances by one
+    millisecond". next_seq(t) returns 0 for the first bundle whose creation
+    time t is later than every creation time it has seen, and the previous
+    value plus 1 for each further bundle, so two bundles created in the same
+    millisecond get different creation timestamps. If the clock steps back,
+    the counter is not reset; a creation timestamp issued before the step
+    can then recur.
+
+    One adapter holds one counter and uses it for every bundle it creates.
+    The counter never reads the envelope Sequence field (PBS-DTN-MAP-01
+    Section 6.1). Calls from several threads are serialized.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._latest_ms: Optional[int] = None
+        self._seq = 0
+
+    def next_seq(self, creation_time_dtn: int) -> int:
+        """Return the sequence number for a bundle created at creation_time_dtn (DTN ms)."""
+        with self._lock:
+            if self._latest_ms is None or creation_time_dtn > self._latest_ms:
+                self._latest_ms = creation_time_dtn
+                self._seq = 0
+            else:
+                self._seq += 1
+            return self._seq
+
+
+# Counter used by pbs_to_bpv7_bundle_mv when the caller passes neither
+# creation_seq nor sequence_counter: the counter of the one adapter a
+# process runs.
+ADAPTER_SEQUENCE_COUNTER = CreationTimestampCounter()
+
+
 # -----------------------------
 # Lifetime (PBS-DTN-MAP-01 Sections 6.1 and 6.1.1; PBS-DTN-MAP-02 Section 4;
 # PBS-ENV-01 Section 12)
@@ -433,8 +477,9 @@ def pbs_to_bpv7_bundle_mv(
     authority_context: str,
     authority_map: AuthorityContextMap,
     default_lifetime_ms: int = 60_000,
-    creation_seq: int = 1,
+    creation_seq: Optional[int] = None,
     clock_us: Callable[[], int] = unix_time_us,
+    sequence_counter: Optional[CreationTimestampCounter] = None,
 ) -> bytes:
     """
     Encapsulate one PBS-ENV-01 v1.3 envelope in one BPv7 bundle.
@@ -446,10 +491,14 @@ def pbs_to_bpv7_bundle_mv(
                          bundle lifetime when TTL is 0 and the upper bound
                          otherwise (PBS-DTN-MAP-01 Section 6.1.1)
     creation_seq         creation timestamp sequence number, a non-negative
-                         integer (RFC 9171 Section 4.2.7); a BP agent supplies
-                         it from its own counter
+                         integer (RFC 9171 Section 4.2.7), used as given; the
+                         caller then keeps the creation timestamps unique.
+                         None (default): take it from sequence_counter
     clock_us             returns Unix time in microseconds; read once, for both
                          the creation time and the envelope age
+    sequence_counter     the adapter's CreationTimestampCounter, used when
+                         creation_seq is None; None (default) uses
+                         ADAPTER_SEQUENCE_COUNTER
 
     The bundle processing control flags are 0, or 0x04 ("bundle must not be
     fragmented") when the source is the null endpoint (RFC 9171 Section 4.2.3).
@@ -461,7 +510,7 @@ def pbs_to_bpv7_bundle_mv(
     creation_seq, a default_lifetime_ms outside 1..4_294_967_295_000, or a
     clock reading at or before the DTN epoch.
     """
-    if creation_seq < 0:
+    if creation_seq is not None and creation_seq < 0:
         raise ValueError("creation_seq must be a non-negative integer (RFC 9171 Section 4.2.7)")
 
     envelope = parse_envelope(pbs_envelope_bytes)
@@ -475,12 +524,16 @@ def pbs_to_bpv7_bundle_mv(
 
     now_us = clock_us()
     lifetime_ms = bundle_lifetime_ms(envelope, now_us, default_lifetime_ms)
+    creation_time_dtn = unix_us_to_dtn_ms(now_us)
+    if creation_seq is None:
+        counter = ADAPTER_SEQUENCE_COUNTER if sequence_counter is None else sequence_counter
+        creation_seq = counter.next_seq(creation_time_dtn)
 
     primary = BPv7Primary(
         destination=dest,
         source=src,
         report_to=rpt,
-        creation_time_dtn=unix_us_to_dtn_ms(now_us),
+        creation_time_dtn=creation_time_dtn,
         creation_seq=creation_seq,
         lifetime_ms=lifetime_ms,
         bundle_proc_flags=BPF_MUST_NOT_FRAGMENT if is_null_endpoint(src) else 0,
@@ -536,14 +589,15 @@ if __name__ == "__main__":
     print(f"Envelope header (hex): {envelope_bytes[:HEADER_SIZE].hex()}")
 
     # 3) Encapsulate. The configured default (300 000 ms) exceeds the
-    #    envelope's 120 s TTL, so the remaining TTL sets the lifetime.
+    #    envelope's 120 s TTL, so the remaining TTL sets the lifetime. No
+    #    creation_seq is passed, so ADAPTER_SEQUENCE_COUNTER assigns the
+    #    creation timestamp sequence number.
     default_lifetime_ms = 300_000
     bundle_bytes = pbs_to_bpv7_bundle_mv(
         pbs_envelope_bytes=envelope_bytes,
         authority_context="pbsf.luna.ops",
         authority_map=ac_map,
         default_lifetime_ms=default_lifetime_ms,
-        creation_seq=42,
     )
 
     print("\nBPv7 bundle (hex):")

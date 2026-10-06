@@ -25,6 +25,7 @@ from pbs_edge_adapter_worked_example import (
     AuthorityContextMap,
     BPv7PayloadBlock,
     BPv7Primary,
+    CreationTimestampCounter,
     EnvelopeExpiredError,
     EnvelopeLengthError,
     build_bpv7_bundle,
@@ -210,6 +211,57 @@ def test_negative_creation_seq_is_rejected():
     with pytest.raises(ValueError):
         encapsulate(make_envelope(ttl=0), now_us=T0_US, creation_seq=-1)
     assert cbor2.loads(encapsulate(make_envelope(ttl=0), now_us=T0_US, creation_seq=0))[0][6][1] == 0
+
+
+def creation_timestamp(envelope: bytes, now_us: int, **kwargs) -> list:
+    bundle = pbs_to_bpv7_bundle_mv(
+        envelope, "pbsf.luna.ops", AC_MAP, clock_us=lambda: now_us, **kwargs
+    )
+    return cbor2.loads(bundle)[0][6]
+
+
+def test_bundles_in_same_millisecond_get_different_creation_timestamps():
+    # RFC 9171 Section 4.2.7: the sequence number comes from a counter that
+    # MAY be reset to zero when the time advances by one millisecond.
+    # T0 + 1 ms is DTN time 820_540_800_001 ms.
+    counter = CreationTimestampCounter()
+    envelope = make_envelope(ttl=30)
+    stamps = [
+        creation_timestamp(envelope, T0_US + 1_000, sequence_counter=counter),
+        creation_timestamp(envelope, T0_US + 1_999, sequence_counter=counter),  # same ms
+        creation_timestamp(envelope, T0_US + 1_500, sequence_counter=counter),  # same ms
+        creation_timestamp(envelope, T0_US + 2_000, sequence_counter=counter),  # next ms
+    ]
+    assert stamps == [
+        [820_540_800_001, 0],
+        [820_540_800_001, 1],
+        [820_540_800_001, 2],
+        [820_540_800_002, 0],
+    ]
+
+
+def test_adapter_counter_is_used_when_no_sequence_is_supplied():
+    envelope = make_envelope(ttl=30)
+    first = creation_timestamp(envelope, T0_US + 3_000)
+    second = creation_timestamp(envelope, T0_US + 3_000)
+    assert first[0] == second[0] == 820_540_800_003
+    assert first != second
+
+
+def test_caller_supplied_creation_seq_is_honoured():
+    # A supplied creation_seq is used as given and does not advance the
+    # adapter's counter.
+    counter = CreationTimestampCounter()
+    envelope = make_envelope(ttl=30)
+    assert creation_timestamp(envelope, T0_US, creation_seq=42, sequence_counter=counter) == [
+        820_540_800_000,
+        42,
+    ]
+    assert creation_timestamp(envelope, T0_US, creation_seq=42, sequence_counter=counter) == [
+        820_540_800_000,
+        42,
+    ]
+    assert creation_timestamp(envelope, T0_US, sequence_counter=counter) == [820_540_800_000, 0]
 
 
 def test_clock_at_or_before_dtn_epoch_is_rejected():
