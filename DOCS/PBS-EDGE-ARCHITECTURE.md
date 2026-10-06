@@ -7,187 +7,183 @@
 
 ## 1. Purpose
 
-This document describes the reference architecture and message flows for the **PBS Edge Adapter (MV)**, including its placement between PBS envelope producers/consumers and a **BPv7 bundle agent**.
+This document describes the reference architecture and message flows of the **PBS Edge Adapter (MV)**: its placement between PBS envelope producers and consumers and a BPv7 bundle protocol agent, its components, and the outbound and inbound flows.
+
+Inside the PBS Edge Adapter, solid outlines mark components that `pbs_edge_adapter_worked_example.py` implements, and dashed outlines mark specified components that it does not implement. Adapter configuration is drawn dashed: the worked example has no configuration loader. PBS producers and consumers, bundle protocol agents and links are external systems.
 
 ---
 
-## 2. Reference Placement in a DTN Stack
+## 2. Placement in a DTN Stack
 
-The PBS Edge Adapter occupies a boundary position between:
-
-- PBS-native systems that emit or receive PBS envelopes, and
-- DTN systems that forward data using BPv7.
+The adapter sits between PBS-native systems, which emit and receive PBS-ENV-01 v1.3 envelopes, and a bundle protocol agent, which forwards BPv7 bundles. Routing, contact plans and convergence-layer selection remain in the agent (PBS-DTN-MAP-02 Section 8).
 
 ```mermaid
 flowchart LR
-  subgraph PBS_Domain["PBS Domain (Local Network / Habitat / Rover LAN)"]
-    P1["PBS Producer(s)\n(rover systems, habitat services, instruments)"]
-    C1["PBS Consumer(s)\n(ops apps, autonomy services, logs)"]
-    IN["Ingress Interface\n(UDP / Pipe / Local IPC)"]
-    OUT["Egress Interface\n(UDP / Pipe / Local IPC)"]
+  subgraph PBS_Domain["PBS domain (local network, habitat, rover LAN)"]
+    P1["PBS producers<br/>(rover systems, habitat services, instruments)"]
+    C1["PBS consumers<br/>(operations, autonomy services, logs)"]
+    IN["Ingress interface"]
+    OUT["Egress interface"]
   end
 
   subgraph EDGE["PBS Edge Adapter (MV)"]
-    AC["Authority Context\n(binding + namespace root)"]
-    ENV["PBS Envelope Handler\n(parse + validate)"]
-    MAP["Mapping Engine\n(PBS ↔ BPv7)"]
-    RT["Deterministic Routing\n(table-driven next-hop)"]
-    IO["Bundle I/O Boundary\n(inject / receive)"]
+    VAL["Envelope validation<br/>(magic, CRC32, priority, length, TTL)"]
+    AC["Authority Context map<br/>(dest, src node ID, report-to)"]
+    ENC["Encapsulation<br/>(primary block + payload block)"]
+    EXT["Extraction<br/>(payload block to envelope)"]
+    IO["Bundle agent interface<br/>(inject / deliver)"]
   end
 
-  subgraph DTN["DTN Transport Domain"]
-    BA["BPv7 Bundle Agent\n(e.g., ION)"]
-    NET["Disrupted / Delayed Links\n(relays, ground stations, crosslinks)"]
-    BA2["BPv7 Bundle Agent\n(peer)"]
+  subgraph DTN["DTN transport domain"]
+    BA["BPv7 bundle protocol agent<br/>(e.g., ION)"]
+    NET["Disrupted / delayed links<br/>(relays, ground stations, crosslinks)"]
+    BA2["BPv7 bundle protocol agent<br/>(peer)"]
   end
 
-  P1 --> IN --> ENV
-  ENV --> AC
-  ENV --> MAP
-  MAP --> RT
-  RT --> IO
-  IO --> BA
-  BA --> NET --> BA2
-
+  P1 --> IN --> VAL --> ENC
+  AC --> ENC
+  ENC --> IO --> BA --> NET --> BA2
   BA2 --> NET --> BA
-  BA --> IO --> MAP --> OUT --> C1
+  BA --> IO
+  IO --> EXT --> OUT --> C1
+
+  classDef planned stroke-dasharray: 5 5
+  class IN,OUT,EXT,IO planned
 ```
 
 ---
 
 ## 3. Functional Component Model
 
-The MV architecture is composed of a small set of deterministic components.
-
 ```mermaid
 flowchart TB
-  subgraph ADAPTER["PBS Edge Adapter (MV) Components"]
-    AC["Authority Context\n- authority identifier\n- namespace root\n- EID construction rules"]
-    ENV["PBS Envelope Handler\n- parse\n- validate\n- normalize envelope model"]
-    RT["Routing Resolver\n- resolve next-hop\n- select destination EID mapping"]
-    MAP["Mapping Engine\n- build BPv7 primary + payload blocks\n- reconstruct PBS envelope from bundle"]
-    IO["BP Agent Interface\n- inject bundle\n- receive bundle\n- deliver to mapping engine"]
-    OBS["Observability\n- structured events\n- counters\n- traces (optional)"]
+  subgraph ADAPTER["PBS Edge Adapter (MV) components"]
+    VAL["Envelope validation<br/>- PBS_LINK.parse_envelope: magic, CRC32, priority, payload length<br/>- input length = 44 + Size<br/>- TTL expiry (PBS-ENV-01 Section 12.2)"]
+    AC["Authority Context map<br/>- named entries<br/>- dest, src node ID, report-to EIDs"]
+    ENC["Encapsulation<br/>- creation time in DTN ms<br/>- lifetime bounded by remaining TTL<br/>- primary block CRC32C<br/>- payload block = envelope bytes"]
+    EXT["Extraction<br/>- payload block bytes to envelope, verbatim"]
+    IO["Bundle agent interface<br/>- inject bundle<br/>- receive bundle"]
+    OBS["Observability<br/>- events and counters"]
   end
 
-  AC --> ENV
-  AC --> RT
-  ENV --> MAP
-  RT --> MAP
-  MAP --> IO
-  ENV --> OBS
-  MAP --> OBS
+  VAL --> ENC
+  AC --> ENC
+  ENC --> IO
+  IO --> EXT
+  EXT --> VAL
+  VAL --> OBS
+  ENC --> OBS
   IO --> OBS
+
+  classDef planned stroke-dasharray: 5 5
+  class EXT,IO,OBS planned
 ```
+
+| Component | Implementation in the worked example |
+|-----------|--------------------------------------|
+| Envelope validation | `PBS_LINK.parse_envelope`, the length check and `bundle_lifetime_ms` |
+| Authority Context map | `AuthorityContextMap` |
+| Encapsulation | `pbs_to_bpv7_bundle_mv`, `build_bpv7_bundle` |
+| Extraction, bundle agent interface, observability | Not implemented |
 
 ---
 
-## 4. Message Flow — Outbound (PBS → BPv7)
+## 4. Message Flow — Outbound (PBS to BPv7)
 
-This flow begins when a PBS producer submits an envelope to the adapter ingress.
+The flow begins when a PBS producer submits an envelope to the adapter ingress. Steps 2 to 7 are implemented in the worked example.
 
 ```mermaid
 sequenceDiagram
   autonumber
-  participant P as PBS Producer
+  participant P as PBS producer
   participant A as PBS Edge Adapter (MV)
-  participant AC as Authority Context (configured)
-  participant R as Routing Resolver
-  participant M as Mapping Engine
-  participant B as BPv7 Bundle Agent
+  participant AC as Authority Context map
+  participant B as BPv7 bundle protocol agent
 
-  P->>A: Submit PBS Envelope (ingress)
-  A->>AC: Bind envelope to active Authority Context
-  A->>R: Resolve route + destination mapping
-  R-->>A: Route decision (next-hop + EID inputs)
-  A->>M: Build BPv7 bundle structure
-  M-->>A: BPv7 bundle (primary + payload)
-  A->>B: Inject BPv7 bundle
-  B-->>A: Accepted for forwarding
+  P->>A: PBS envelope (ingress)
+  A->>A: Validate magic, CRC32, priority, length
+  A->>AC: Resolve the named authority context
+  AC-->>A: dest, src node ID, report-to
+  A->>A: Check TTL, select lifetime (PBS-DTN-MAP-02 Section 4)
+  A->>A: Build primary block (DTN ms creation time, CRC32C)
+  A->>A: Payload block carries the envelope bytes unmodified
+  A->>B: Inject bundle
 ```
 
 ### Outbound Transformation Summary
 
-- PBS identifiers are interpreted under the active Authority Context.
-- BPv7 Destination and Source EIDs are constructed deterministically.
-- PBS payload bytes become the BPv7 Payload Block bytes.
+- The Authority Context map supplies the destination EID, source node ID and report-to EID. No envelope field enters an EID.
+- The bundle lifetime is the configured default for TTL 0 and min(default, remaining TTL) otherwise.
+- The complete envelope, 44-byte header and payload, becomes the payload block data.
 
 ---
 
-## 5. Message Flow — Inbound (BPv7 → PBS)
+## 5. Message Flow — Inbound (BPv7 to PBS)
 
-This flow begins when a BPv7 bundle is delivered from the bundle agent to the adapter.
+The flow begins when the bundle protocol agent delivers a bundle to the adapter. The worked example does not implement it.
 
 ```mermaid
 sequenceDiagram
   autonumber
-  participant B as BPv7 Bundle Agent
+  participant B as BPv7 bundle protocol agent
   participant A as PBS Edge Adapter (MV)
-  participant AC as Authority Context (configured)
-  participant M as Mapping Engine
-  participant C as PBS Consumer
+  participant C as PBS consumer
 
-  B->>A: Deliver received BPv7 bundle
-  A->>AC: Interpret EIDs under active Authority Context
-  A->>M: Reconstruct PBS envelope model
-  M-->>A: PBS Envelope (header + payload)
-  A->>C: Deliver PBS Envelope (egress)
+  B->>A: Deliver bundle (validated by the agent)
+  A->>A: Extract payload block bytes as the envelope
+  A->>A: Validate magic, CRC32, priority, TTL (PBS-ENV-01 Section 14)
+  A->>C: Deliver envelope unmodified (egress)
 ```
 
 ### Inbound Transformation Summary
 
-- BPv7 Source/Destination EIDs are parsed relative to the active Authority Context.
-- Payload Block bytes become the PBS payload bytes.
-- A PBS envelope is reconstructed and delivered to local consumers.
+- The bundle protocol agent validates the bundle before PBS processing (PBS-DTN-MAP-01 Section 7.1).
+- The payload block bytes are the original envelope, extracted verbatim (PBS-DTN-MAP-01 Section 7.2).
+- No envelope field is derived from bundle EIDs.
 
 ---
 
 ## 6. Configuration as an Architectural Boundary
 
-Configuration defines:
-
-- the active Authority Context,
-- the EID construction rules used by the mapping engine,
-- routing resolution tables for deterministic next-hop selection,
-- ingress/egress interface endpoints.
+Configuration defines the Authority Context map and the default bundle lifetime. The `interfaces` key is reserved (Appendix B, Section B.7). [PBS-EDGE-CONFIG-SCHEMA](PBS-EDGE-CONFIG-SCHEMA.md) specifies the configuration. The worked example takes the equivalent values as Python arguments.
 
 ```mermaid
 flowchart LR
-  CONF["Adapter Configuration\n- authority context\n- EID scheme + rules\n- routing table\n- defaults (lifetime, etc.)"]
-  AC["Authority Context"]
-  RT["Routing Resolver"]
-  MAP["Mapping Engine"]
-  IO["BP Agent Interface"]
+  CONF["Adapter configuration<br/>- authority_contexts<br/>- bundle.default_lifetime_ms<br/>- interfaces (reserved)"]
+  AC["Authority Context map"]
+  ENC["Encapsulation"]
+  IO["Bundle agent interface"]
 
   CONF --> AC
-  CONF --> RT
-  CONF --> MAP
+  CONF --> ENC
   CONF --> IO
+
+  classDef planned stroke-dasharray: 5 5
+  class CONF,IO planned
 ```
 
 ---
 
-## 7. Integration Boundary with the BPv7 Bundle Agent
+## 7. Integration Boundary with the Bundle Protocol Agent
 
-The adapter and the bundle agent interact through a clear injection/delivery boundary:
+The adapter and the bundle protocol agent interact only through bundle injection and delivery. The agent provides forwarding, storage, routing and other DTN services.
 
 ```mermaid
 flowchart LR
-  A["PBS Edge Adapter (MV)\nMapping + Routing"]
-  I["Bundle Injection / Delivery Boundary"]
-  B["BPv7 Bundle Agent\nForwarding + Storage + DTN Services"]
+  A["PBS Edge Adapter (MV)<br/>validation + encapsulation (implemented)<br/>extraction (not implemented)"]
+  I["Bundle injection / delivery boundary"]
+  B["BPv7 bundle protocol agent<br/>forwarding + storage + routing"]
 
   A <--> I <--> B
+
+  classDef planned stroke-dasharray: 5 5
+  class I planned
 ```
 
 ---
 
 ## 8. Architecture Outputs
 
-The reference architecture produces:
-
-- Deterministic PBS → BPv7 encapsulation aligned with the mapping appendix
-- Deterministic BPv7 → PBS reconstruction aligned with the Authority Context model
-- A clear placement model suitable for DTN interoperability review
-
----
+- PBS to BPv7 encapsulation per [PBS-BPv7-MAPPING-APPENDIX](PBS-BPv7-MAPPING-APPENDIX.md), implemented and tested in the worked example.
+- BPv7 to PBS extraction per PBS-DTN-MAP-01 Section 7, specified and not implemented.
+- A placement model for DTN interoperability review.
