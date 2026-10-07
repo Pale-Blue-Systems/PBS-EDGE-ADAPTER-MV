@@ -1,0 +1,5 @@
+# Python dependencies of the ION end-to-end demonstration and its tests,
+# pinned for reproducibility (DOCS/PBS-ION-E2E-TEST-PLAN.md Section 2).
+cbor2==6.1.5
+pytest==9.1.1
+pbs-link @ git+https://github.com/Pale-Blue-Systems/PBS_LINK.git@c377e0b966c626ebb7dbeab12be884c3f1cebf25

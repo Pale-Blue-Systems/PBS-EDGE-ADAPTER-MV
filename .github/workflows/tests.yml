@@ -25,3 +25,40 @@ jobs:
         run: pytest -q
       - name: Run worked example
         run: python pbs_edge_adapter_worked_example.py
+
+  ion-e2e:
+    # End-to-end tests against NASA/JPL ION (DOCS/PBS-ION-E2E-TEST-PLAN.md).
+    # PBS_ION_REQUIRED=1 makes a missing ION fail the job instead of skipping.
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      ION_PREFIX: ${{ github.workspace }}/.ion/install
+      PBS_ION_REQUIRED: "1"
+      PBS_ION_EVIDENCE_DIR: ${{ github.workspace }}/ion-test-results
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install ION build tools
+        run: sudo apt-get update && sudo apt-get install -y autoconf automake libtool
+      - name: Restore ION build
+        uses: actions/cache@v4
+        with:
+          path: .ion/install
+          key: ion-${{ runner.os }}-${{ hashFiles('scripts/ion-release.env') }}
+      - name: Build ION (pinned release)
+        run: scripts/build_ion.sh "$ION_PREFIX"
+      - name: Install pinned Python dependencies
+        run: python -m pip install -r requirements-ion-demo.txt
+      - name: Run all tests, including ION end-to-end
+        run: pytest -v --junitxml=ion-test-results/junit.xml
+      - name: Run the demonstration
+        run: python -m pbs_ion_demo --run-dir ion-test-results/demo
+      - name: Upload test records
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ion-e2e-records
+          path: ion-test-results/
+          if-no-files-found: warn

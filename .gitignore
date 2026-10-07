@@ -5,3 +5,7 @@ __pycache__/
 build/
 dist/
 .DS_Store
+# ION build and demonstration outputs
+.ion/
+ion-test-results/
+ion-demo-runs/

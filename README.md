@@ -4,7 +4,7 @@
 
 This repository specifies the **Pale Blue Systems (PBS) Edge Adapter** and demonstrates it with a tested Python worked example. The adapter encapsulates a PBS-ENV-01 v1.3 envelope in a Bundle Protocol Version 7 (BPv7) bundle (IETF RFC 9171) for carriage across a delay/disruption-tolerant network (DTN).
 
-No PBS edge adapter product is published. The worked example builds bundle bytes; it does not connect to a bundle protocol agent.
+No PBS edge adapter product is published. The worked example builds bundle bytes; it does not connect to a bundle protocol agent. The [ION end-to-end demonstration](#end-to-end-demonstration-over-nasajpl-ion) does: it carries envelopes between two NASA/JPL ION nodes across an emulated Earth–Moon link.
 
 A deployment requires a BPv7 bundle protocol agent. The NASA/JPL Interplanetary Overlay Network (ION, <https://github.com/nasa-jpl/ION-DTN>) is one; its `bpv7` module implements RFC 9171. JPL's ION configuration tools are at <https://github.com/nasa-jpl/ion-config-tool>. Use the upstream repositories; Pale Blue Systems does not maintain forks of them.
 
@@ -88,9 +88,33 @@ PBS-DTN-MAP-01 (v1.5) and PBS-DTN-MAP-02 (v1.5) are both optional interoperabili
 
 ---
 
+## End-to-End Demonstration over NASA/JPL ION
+
+`pbs_ion_demo/` carries PBS envelopes end to end through ION, release `ion-open-source-4.2.0`, built unmodified from <https://github.com/nasa-jpl/ION-DTN>. Two ION nodes, a lunar surface gateway (`ipn:1`) and an Earth operations gateway (`ipn:2`), are joined over ION's UDP convergence layer by a link emulator. The emulator adds the 1.2822 s one-way light time of the Moon's mean distance and records every bundle on the link. The gateway validates each envelope, selects the bundle lifetime and ION class of service, and hands the envelope to ION with ION's `bpsendfile`. ION creates the bundle and assigns its creation timestamp (PBS-DTN-MAP-01 Section 6.1). The receiving gateway collects ION's deliveries from `bprecvfile` and checks the restored envelope.
+
+The demonstration shows downlink and uplink delivery, priority mapped to ION's expedited, standard and bulk classes, a bundle held through a contact gap and forwarded when the contact opens, a bundle whose lifetime ends in storage and is never sent, and ION accepting bundles encoded by the worked example.
+
+| Document | Content |
+|----------|---------|
+| [`DOCS/PBS-ION-E2E-DEMO.md`](DOCS/PBS-ION-E2E-DEMO.md) | Architecture, how to run, example output, limitations, references |
+| [`DOCS/PBS-ION-MAPPING-PROFILE.md`](DOCS/PBS-ION-MAPPING-PROFILE.md) | Mapping profile and no-expiry lifetime for ION 4.2.0 (PBS-DTN-MAP-01 Sections 6.1.1, 6.3; PBS-DTN-MAP-02 Sections 4, 5) |
+| [`DOCS/PBS-ION-E2E-TEST-PLAN.md`](DOCS/PBS-ION-E2E-TEST-PLAN.md) | Requirements, verification cross-reference matrix, test cases UT-01 to UT-24 and IT-01 to IT-11, procedures and records |
+
+```bash
+scripts/build_ion.sh                       # pinned ION release into .ion/install
+export ION_PREFIX="$PWD/.ion/install"
+python -m pip install -r requirements-ion-demo.txt
+python -m pbs_ion_demo                     # the demonstration
+PBS_ION_REQUIRED=1 pytest -v               # all tests, including ION end to end
+```
+
+`TESTS/test_ion_demo_units.py` (35 tests) runs without ION. `TESTS/ion/test_ion_end_to_end.py` (12 tests) runs against ION and is skipped without it, unless `PBS_ION_REQUIRED=1`. The CI job `ion-e2e` builds ION, runs every test and the demonstration, and keeps the as-run records.
+
+---
+
 ## How to Run
 
-CI runs these commands on Python 3.10, 3.11 and 3.12.
+CI runs these commands on Python 3.10, 3.11 and 3.12. They also run the ION demonstration's unit tests; the ION end-to-end tests are skipped without ION (see the previous section).
 
 ```bash
 pip install pytest cbor2 git+https://github.com/Pale-Blue-Systems/PBS_LINK.git
@@ -128,7 +152,12 @@ This repository is written for:
 | `DOCS/PBS-EDGE-ARCHITECTURE.md` | Placement, components and message flows (Mermaid) |
 | `WHY-NOW.md` | Basis for the work |
 | `CHANGELOG.md` | Change history |
-| `.github/workflows/tests.yml` | CI: tests and worked example |
+| `pbs_ion_demo/` | End-to-end demonstration over ION: gateway, ION node control, link emulator, BPv7 wire decoder |
+| `TESTS/test_ion_demo_units.py`, `TESTS/ion/` | Demonstration tests: unit tests, and end-to-end tests against ION |
+| `DOCS/PBS-ION-E2E-DEMO.md`, `DOCS/PBS-ION-MAPPING-PROFILE.md`, `DOCS/PBS-ION-E2E-TEST-PLAN.md` | Demonstration, ION mapping profile, test plan |
+| `scripts/build_ion.sh`, `scripts/ion-release.env` | Build of the pinned ION release |
+| `requirements-ion-demo.txt` | Pinned Python dependencies of the demonstration |
+| `.github/workflows/tests.yml` | CI: tests and worked example; job `ion-e2e` builds ION and runs the end-to-end tests and the demonstration |
 
 Planned additions (in development):
 
