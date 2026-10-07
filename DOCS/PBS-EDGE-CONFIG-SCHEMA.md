@@ -18,6 +18,12 @@ This appendix defines the configuration inputs of a PBS Edge Adapter instance. T
 
 `pbs_to_bpv7_bundle_mv` fixes the primary block CRC type at 2 (CRC32C) and the payload block CRC type at 0. Neither is a configuration input.
 
+Pale Blue Systems is building the full configuration schema, given in the sections marked as planned. The schema specifies how an adapter instance is bound to:
+- a single Authority Context,
+- deterministic routing rules, applied as configuration of the bundle protocol agent's routing (PBS-DTN-MAP-02 Section 8),
+- BPv7 endpoint construction parameters, and
+- ingress / egress interfaces.
+
 ---
 
 ## B.2 Top-Level Structure
@@ -40,6 +46,13 @@ bundle:
 
 interfaces: {}            # reserved
 ```
+
+The planned configuration model (in development) is composed of four top-level sections:
+
+1. Adapter Identity
+2. Authority Context
+3. Routing Configuration
+4. Interface Bindings
 
 ---
 
@@ -81,6 +94,42 @@ authority_contexts:
 
 EID URIs use the dtn scheme (`dtn://node-name/demux` or `dtn:none`) or the ipn scheme (`ipn:node.service`), encoded in the bundle as RFC 9171 Section 4.2.5.1 specifies. No envelope field enters any EID. [PBS-AUTHORITY-CONTEXT](PBS-AUTHORITY-CONTEXT.md) defines the Authority Context.
 
+### B.4.1 Planned Authority Context Definition (in development)
+
+The lunar demo configuration:
+
+```yaml
+authority_context:
+  authority_id: "pbsf-lunar-demo"
+  namespace_root: "dtn://pbsf/lunar"
+  eid_scheme: "dtn"
+  eid_rules:
+    destination_format: "{namespace_root}/{scope}/{destination}"
+    source_format: "dtn://{source}.lunar.pbsf/"
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `authority_id` | string | Stable identifier for the authority domain |
+| `namespace_root` | string | Root namespace used for BPv7 EID construction |
+| `eid_scheme` | string | BPv7 EID scheme (e.g., `dtn`, `ipn`) |
+| `eid_rules` | object | Deterministic formatting rules for EIDs |
+
+Each rover, and each surface asset that originates bundles, runs its own ION bundle protocol agent node, so `source_format` yields that asset's own node ID, a dtn EID with an empty demux (RFC 9171 Sections 4.2.5.1.1 and 5.2).
+
+### B.4.2 EID Rules
+
+The `eid_rules` object defines how PBS identifiers are transformed into BPv7 EIDs.
+
+Supported placeholders include:
+
+- `{namespace_root}`
+- `{scope}`, from the Authority Context configuration or a PBS-AUTH-01 frame (PBS-ADDR-01 Section 3)
+- `{destination}`, from the Authority Context configuration: the destination EID is configured at the gateway (PBS-DTN-MAP-01 Sections 6.1 and 8)
+- `{source}`, the envelope Source ID (PBS-DTN-MAP-01 Section 8)
+
+Formatting is purely deterministic and string-based.
+
 ---
 
 ## B.5 Bundle Section
@@ -104,11 +153,94 @@ An envelope with TTL 0 never expires (PBS-ENV-01 Section 12.1). PBS-DTN-MAP-01 S
 
 The configuration has no routing section. Contact plans, route computation and convergence-layer selection are DTN and network-service functions (PBS-DTN-MAP-02 Section 8). They are configured in the bundle protocol agent, not in the adapter.
 
+### B.6.1 Planned Routing Section (in development)
+
+Pale Blue Systems is building a routing section. The adapter applies it as configuration of the bundle protocol agent's routing; contact plans, route computation and path selection remain in the agent (PBS-DTN-MAP-02 Section 8). PBS-ROUTE-01 Section 6 permits gateway routing tables.
+
+```yaml
+routing:
+  default_lifetime_seconds: 86400
+  routes:
+    - scope: "telemetry"
+      next_hop: "dtn://relay/orbiter"
+    - scope: "command"
+      next_hop: "dtn://relay/direct"
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `default_lifetime_seconds` | integer | Default BPv7 bundle lifetime: the no-expiry lifetime for TTL 0 and the upper bound otherwise; the remaining TTL bounds each lifetime (PBS-DTN-MAP-01 Sections 6.1 and 6.1.1) |
+| `routes` | list | Deterministic routing table |
+
+### B.6.2 Route Entries
+
+Each route entry has the following structure:
+
+```yaml
+- scope: string
+  next_hop: string
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `scope` | string | PBS scope identifier, from the Authority Context configuration or a PBS-AUTH-01 frame (the envelope header has no scope field) |
+| `next_hop` | string | BPv7 EID or agent-specific next-hop identifier |
+
+Routing resolution is table-driven and does not perform runtime arbitration.
+
 ---
 
 ## B.7 Interfaces
 
 `interfaces` is reserved for the ingress, egress and bundle protocol agent bindings. This revision specifies no keys under it. The worked example has no ingress, egress or agent interface.
+
+Pale Blue Systems is building the interface bindings below (planned, in development).
+
+### B.7.1 Ingress Interface
+
+```yaml
+interfaces:
+  ingress:
+    type: "udp"
+    bind_address: "0.0.0.0"
+    port: 4556
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `type` | string | Ingress interface type |
+| `bind_address` | string | Local bind address |
+| `port` | integer | Local port |
+
+### B.7.2 Egress Interface
+
+```yaml
+  egress:
+    type: "udp"
+    destination_address: "127.0.0.1"
+    port: 4557
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `type` | string | Egress interface type |
+| `destination_address` | string | Destination address |
+| `port` | integer | Destination port |
+
+### B.7.3 BPv7 Bundle Agent Interface
+
+```yaml
+  bp_agent:
+    type: "ion"
+    endpoint: "/var/run/ion/bundle.sock"
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `type` | string | Bundle agent type |
+| `endpoint` | string | Injection / delivery interface |
+
+This interface defines the integration boundary with the BPv7 bundle agent.
 
 ---
 
@@ -123,8 +255,24 @@ A valid configuration has:
 
 The worked example enforces the second and third rules when `AuthorityContextMap` is constructed, and the range of the fourth when it selects a lifetime. It connects to no bundle protocol agent and does not check the overflow condition.
 
+For the planned configuration (in development), a valid configuration must satisfy:
+
+- Exactly one Authority Context
+- At least one routing entry
+- Fully specified ingress, egress, and BP agent interfaces
+
+Validation is performed prior to adapter activation.
+
 ---
 
 ## B.9 Determinism
 
 With identical configuration, the same authority context name always yields the same three EIDs, and the same envelope, sequence number and clock reading always yield the same lifetime and bundle bytes. When the caller supplies no sequence number, the adapter's counter gives each bundle created in the same millisecond a different one ([PBS-BPv7-MAPPING-APPENDIX](PBS-BPv7-MAPPING-APPENDIX.md) Section A.6.1).
+
+---
+
+## B.10 Summary
+
+This appendix defines the **minimum viable configuration schema** required to operate a PBS Edge Adapter instance.
+
+The schema establishes explicit authority binding, deterministic routing configuration for the bundle protocol agent, and unambiguous integration with BPv7 transport infrastructure.

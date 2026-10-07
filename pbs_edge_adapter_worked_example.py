@@ -177,6 +177,9 @@ class AuthorityContextMap:
     EID, already encoded as BPv7 EIDs. The PBS-ENV-01 v1.3 header has no
     destination, authority or scope field, so no envelope field contributes
     to these values. The caller names the context for each envelope.
+
+    In a full Edge Adapter, these would be sourced from the PBS Authority Context registry
+    and deployment config. This MV just demonstrates deterministic selection.
     """
     table: Dict[str, Dict[str, EID]]
 
@@ -334,6 +337,10 @@ def build_bpv7_bundle(primary: BPv7Primary, payload_block: BPv7PayloadBlock) -> 
 # 2000-01-01 (IERS Leap_Second.dat: TAI-UTC 32 s from 1999-01-01, 37 s from
 # 2017-01-01), so this value is 5000 ms less than a count of elapsed SI
 # milliseconds.
+# NOTE: This reference example approximates DTN time by offsetting Unix time.
+# Production gateways MUST take the creation timestamp from the gateway's
+# bundle protocol agent (PBS-DTN-MAP-01 Section 6.1), with DTN time derived
+# from a proper TAI-based clock source.
 DTN_EPOCH_UNIX_MS = 946_684_800_000
 
 

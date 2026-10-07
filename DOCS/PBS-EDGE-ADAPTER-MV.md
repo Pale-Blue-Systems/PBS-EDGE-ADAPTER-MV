@@ -49,17 +49,55 @@ Inbound (BPv7 to PBS), per bundle (not implemented):
 2. Extract the payload block content as the envelope, verbatim (PBS-DTN-MAP-01 Section 7.2).
 3. Validate the envelope per PBS-ENV-01 Section 14 and deliver it to the local egress interface.
 
+### 4.1 Planned Adapter (in development)
+
+Pale Blue Systems is building the full adapter. At a high level, it:
+
+1. Accepts PBS envelopes from a local ingress interface
+2. Binds each envelope to a configured **Authority Context**
+3. Maps PBS routing and scope identifiers, taken from the Authority Context configuration or a PBS-AUTH-01 frame (the envelope header has none), to BPv7 endpoint identifiers
+4. Encapsulates the entire PBS envelope (44-byte header and payload) as an opaque BPv7 payload block
+5. Emits a BPv7 bundle suitable for injection into a bundle agent
+
+The reverse process applies for inbound bundles; the envelope is extracted verbatim (PBS-DTN-MAP-01 Section 7.2).
+
+When receiving BPv7 bundles from a bundle agent, the adapter:
+
+1. Extracts the Payload Block
+2. Restores the PBS envelope from it verbatim, without modifying any envelope field (PBS-DTN-MAP-01 Section 7.2), and resolves its delivery using:
+   - The active Authority Context
+   - Source and destination information derived from BPv7 EIDs
+3. Delivers the restored PBS envelope to the local egress interface
+
+This process preserves payload integrity and routing identity. The header CRC32 covers the 44-byte header only; payload integrity across the DTN segment rests on payload protection, PBS-SEC-B-01 or application checks.
+
 ---
 
 ## 5. Authority Context
 
 An Authority Context is a named configuration entry holding the destination EID, source node ID and report-to EID used for every bundle built under it. The adapter holds a map of contexts, and each envelope is encapsulated under exactly one context, named by the caller. The PBS-ENV-01 v1.3 header has no authority, scope or destination field. The adapter's Authority Context is distinct from the PBS-AUTH-01 authority context frame (PBS-MUX frame type `0x08`), which travels inside the envelope payload and which the adapter does not read. [PBS-AUTHORITY-CONTEXT](PBS-AUTHORITY-CONTEXT.md) specifies it.
 
+### 5.1 Planned Definition (in development)
+
+An **Authority Context** represents the administrative and routing namespace within which the edge adapter operates.
+
+Each adapter instance is configured with exactly one active Authority Context at a time.
+
+### 5.2 Usage
+
+The Authority Context is used to:
+
+- Interpret PBS scope and routing identifiers, which come from its configuration or a PBS-AUTH-01 frame (the envelope header carries none)
+- Construct BPv7 Endpoint Identifiers (EIDs)
+- Ensure deterministic namespace separation across shared transport infrastructure
+
 ---
 
 ## 6. PBS Envelope Handling
 
 ### 6.1 Envelope Acceptance
+
+The adapter accepts PBS envelopes that conform to the PBS envelope specification in effect at the time of deployment.
 
 The adapter accepts PBS-ENV-01 v1.3 envelopes: a fixed 44-byte big-endian header followed by `Size` payload bytes. Each envelope is processed as one unit and maps to one bundle (PBS-DTN-MAP-01 Section 5.1). The adapter rejects an envelope that fails any check in Section 4, step 2, and produces no bundle. [PBS-BPv7-MAPPING-APPENDIX](PBS-BPv7-MAPPING-APPENDIX.md) Section A.10 lists each rejection.
 
@@ -78,11 +116,26 @@ Each bundle is a CBOR indefinite-length array of two blocks (RFC 9171 Section 4.
 
 The adapter adds no extension blocks.
 
+### 7.1 Planned Endpoint Identification (in development)
+
+PBS routing identifiers, which the gateway holds in its Authority Context configuration (the envelope header carries none; PBS-DTN-MAP-01 Sections 6.1 and 8), are mapped to BPv7 Endpoint Identifiers (EIDs) using a deterministic mapping rule derived from:
+
+- Authority Context
+- PBS destination scope, set by that configuration or a PBS-AUTH-01 frame
+- Local routing configuration
+
+The resulting EID uniquely identifies the BPv7 destination within the active authority namespace.
+
 ---
 
 ## 8. Deterministic Behavior
 
 Identical envelope bytes, Authority Context entry, configured default lifetime, sequence number and clock reading produce identical bundle bytes; the tests check this. When the caller supplies no sequence number, the adapter's counter gives each bundle created in the same millisecond a different one. The adapter performs no policy arbitration, trust scoring or routing.
+
+In the planned adapter (in development):
+
+- No policy arbitration, trust scoring, or dynamic decision-making is performed
+- Routing resolution is table-driven and explicit, and is applied as configuration of the bundle protocol agent's routing; route computation and path selection remain in the agent (PBS-DTN-MAP-02 Section 8; PBS-ROUTE-01 Section 6)
 
 ---
 
@@ -94,6 +147,21 @@ The LunaNet Interoperability Specification, Version 5 (LNIS V005, NASA, ESA and 
 
 ---
 
-## 10. Status
+## 10. Applicability
+
+The PBS Edge Adapter reference design applies to environments including:
+
+- Space and lunar communication systems
+- Planetary surface networks
+- Disrupted or intermittently connected terrestrial networks
+- Multi-authority DTN deployments
+
+The design is transport-agnostic beyond its alignment with BPv7.
+
+---
+
+## 11. Status
 
 Reference draft. The worked example implements Section 4, outbound steps 2 to 5. The remaining steps and the inbound direction are specified here and not implemented.
+
+It is expected to evolve as PBS specifications mature and as feedback is incorporated from technical review and interoperability exercises.

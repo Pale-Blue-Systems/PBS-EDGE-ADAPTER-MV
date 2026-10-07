@@ -10,6 +10,45 @@ A deployment requires a BPv7 bundle protocol agent. The NASA/JPL Interplanetary 
 
 ---
 
+## Context and Intent
+
+Pale Blue Systems publishes this work in anticipation of a future space environment that includes multiple space agencies, commercial operators, private missions, and long-lived infrastructure operating concurrently beyond Earth.
+
+This repository does not claim to solve a current operational deficiency. It contributes to early architectural discussion by making future authority and interoperability considerations explicit—before infrastructure, protocols, and assumptions become fixed.
+
+---
+
+## Planned Edge Adapter (in development)
+
+Pale Blue Systems is building the full PBS Edge Adapter that `DOCS/` specifies. The worked example implements the part described in the next section.
+
+### Scope and Intent
+
+The PBS Edge Adapter serves as a **boundary component** between:
+
+- **PBS envelopes**, which carry authority-aware routing and scope metadata in PBS-ADDR-01 and PBS-AUTH-01 payload frames (the 44-byte PBS-ENV-01 header has no such field), and
+- **BPv7 bundle agents**, which provide delay-tolerant transport across heterogeneous and disrupted networks.
+
+This repository focuses on **clarifying that boundary** and demonstrating how the mapping can be performed deterministically and transparently.
+
+### PBS → BPv7 Mapping Specification
+
+A concrete, inspectable description of how:
+
+- PBS envelope fields are mapped to BPv7 bundle elements
+- PBS authority and scope identifiers, taken from the gateway's Authority Context configuration or a PBS-AUTH-01 frame, are translated into BPv7 Endpoint Identifiers (EIDs)
+- Entire PBS envelopes (44-byte header and payload) are encapsulated as opaque BPv7 payload blocks
+
+The mapping is designed to be **deterministic**, **lossless**, and **transport-agnostic**.
+
+### Authority-Aware Edge Behavior
+
+The reference design treats **Authority Context** as a first-class input to routing and encapsulation decisions at the edge. Routing decisions take effect as configuration of the bundle protocol agent's routing; route computation and path selection remain in the agent (PBS-DTN-MAP-02 Section 8).
+
+This ensures that PBS envelopes originating from different authorities remain logically separated while sharing common transport infrastructure.
+
+---
+
 ## What the Worked Example Implements
 
 `pbs_edge_adapter_worked_example.py` converts one envelope into one bundle (`pbs_to_bpv7_bundle_mv`):
@@ -65,6 +104,17 @@ The worked example prints the envelope header, the bundle in hex, the decoded pr
 
 ---
 
+## Intended Audience
+
+This repository is written for:
+
+- Space and DTN engineers evaluating interoperability approaches
+- Standards bodies and working groups reviewing edge-mapping concepts
+- Researchers and system architects exploring authority-aware networking models
+- Organizations assessing how PBS envelopes integrate with existing DTN infrastructure
+
+---
+
 ## Repository Contents
 
 | Path | Content |
@@ -80,6 +130,11 @@ The worked example prints the envelope header, the bundle in hex, the decoded pr
 | `CHANGELOG.md` | Change history |
 | `.github/workflows/tests.yml` | CI: tests and worked example |
 
+Planned additions (in development):
+
+- `reference/` — Minimal reference logic illustrating the adapter concept
+- `examples/` — Example PBS envelopes and corresponding BPv7 mappings
+
 ---
 
 ## Standards Basis
@@ -87,6 +142,13 @@ The worked example prints the envelope header, the bundle in hex, the decoded pr
 - **PBS:** PBS-ENV-01 v1.5, PBS-DTN-MAP-01 v1.5 and PBS-DTN-MAP-02 v1.5. The current PBS release is PBS v1.5.0 (2026-10-06), a corrective release with no wire-format change: the 44-byte PBS-ENV-01 header defined in v1.3 is unchanged.
 - **BPv7:** IETF RFC 9171, *Bundle Protocol Version 7*, <https://www.rfc-editor.org/rfc/rfc9171>.
 - **LunaNet:** LunaNet Interoperability Specification, Version 5 (LNIS V005, NASA, ESA and JAXA, 29 January 2025), Section 3.1.2: "The Bundle Protocol version 7 (BPv7) shall be used" for DTN network communications services. <https://www.nasa.gov/wp-content/uploads/2025/02/lunanet-interoperability-specification-v5-baseline.pdf>
+
+---
+
+## Status
+
+This repository represents a **minimum viable reference** for the PBS Edge Adapter concept.
+It is published to support technical clarity, review, and discussion as PBS standards evolve.
 
 ---
 

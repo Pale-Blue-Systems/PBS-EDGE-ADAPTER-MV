@@ -10,6 +10,8 @@
 
 This appendix defines how the PBS Edge Adapter encapsulates one PBS-ENV-01 v1.3 envelope in one BPv7 bundle. `pbs_edge_adapter_worked_example.py` (`pbs_to_bpv7_bundle_mv`) implements Sections A.3 to A.8 and A.10. Section A.9 defines the inbound direction, which the worked example does not implement.
 
+The mapping described herein enables PBS envelopes to be encapsulated into BPv7 bundles and restored verbatim without loss of payload integrity or routing identity. The header CRC32 covers the 44-byte header only, so the plan includes payload protection, PBS-SEC-B-01 or application checks, for payload integrity across the DTN segment.
+
 PBS specifications are in [PBS-PROTOCOL-OPEN](https://github.com/Pale-Blue-Systems/PBS-PROTOCOL-OPEN/tree/main/PBS-RFC-LIB). Both PBS mapping documents apply. PBS-DTN-MAP-01 (v1.5) defines the envelope-to-bundle mapping at a gateway boundary. PBS-DTN-MAP-02 (v1.5) defines endpoint mapping, lifetime and freshness, priority and QoS, service intent and security rules for BPv7 carriage. PBS-DTN-MAP-01 Sections 6.1 and 6.3 refer to PBS-DTN-MAP-02 Section 4 for finite lifetime limits and Section 5 for the mapping profile.
 
 ---
@@ -45,6 +47,19 @@ The adapter accepts a PBS-ENV-01 v1.3 envelope: a fixed 44-byte big-endian heade
 The header contains no destination, scope, authority or message identifier field, and no version field other than Magic. No header field contributes to a bundle EID. Every header byte and the payload travel unmodified in the payload block (Section A.7).
 
 `PBS_LINK.parse_envelope` (PBS_LINK 0.1.3) checks the 44-byte minimum length, magic, CRC32, priority and payload length, in that order. The adapter then checks the input length and the TTL. The payload-length check therefore precedes the TTL check; PBS-ENV-01 Section 14 lists TTL as step 4 and payload extraction as step 5. Either failure discards the envelope and produces no bundle; only the exception differs. Section A.10 lists the rejections.
+
+### A.3.1 Planned Logical Envelope Model (in development)
+
+For the purposes of the planned mapping, a PBS envelope is associated with the following logical elements. The header carries some of them; the gateway takes the others from its Authority Context configuration or a PBS-AUTH-01 frame:
+
+- PBS Version (the Magic byte; PBS-ENV-01 Section 5)
+- Source Identifier (the Source ID field)
+- Destination Identifier (Authority Context configuration; PBS-DTN-MAP-01 Sections 6.1 and 8)
+- Scope Identifier (Authority Context configuration or a PBS-AUTH-01 frame; PBS-ADDR-01 Section 3)
+- Message Identifier (Source ID, Sequence and Timestamp; PBS-ENV-01 has no Message Identifier field)
+- Payload (byte sequence)
+
+Field naming is logical rather than implementation-specific.
 
 ---
 
@@ -99,6 +114,27 @@ When `src` is the null endpoint, the adapter sets bundle processing control flag
 ### A.5.4 Source ID Translation
 
 The worked example does not implement the PBS-DTN-MAP-01 Section 8 translation of each envelope Source ID to its own EID. Every bundle carries the configured `src` node ID. The envelope Source ID reaches the receiver inside the payload block.
+
+### A.5.5 Planned EID Construction (in development)
+
+The BPv7 **Destination EID** is derived as follows:
+
+| Input Element        | Source            | Usage in EID Construction |
+|----------------------|-------------------|---------------------------|
+| Authority Context    | Adapter config    | Namespace root            |
+| PBS Destination ID   | Adapter config (PBS-DTN-MAP-01 Sections 6.1 and 8) | Node or service component |
+| PBS Scope Identifier | Adapter config or PBS-AUTH-01 frame (PBS-ADDR-01 Section 3) | Hierarchical qualifier    |
+
+The resulting Destination EID uniquely identifies the target within the Authority Context.
+
+The BPv7 **Source EID** is constructed using:
+
+| Input Element        | Source            | Usage in EID Construction |
+|----------------------|-------------------|---------------------------|
+| Authority Context    | Adapter config    | Namespace root            |
+| PBS Source ID        | PBS envelope      | Node or service component |
+
+The Source EID represents the originating PBS entity within the same Authority Context. Each rover, and each surface asset that originates bundles, runs its own ION bundle protocol agent node, so the Source EID names that asset's own node (RFC 9171 Section 5.2). The PBS Gateway module (PBS-FRU-01) on the rover hosts that node.
 
 ---
 
@@ -161,6 +197,13 @@ The payload block's data field is the complete input: the 44-byte header followe
 
 The envelope's Source ID, Sequence and Timestamp travel inside the payload block. The bundle's source node ID and creation timestamp identify the bundle (RFC 9171 Section 4.2.7), not the envelope. No extension block carries PBS identity.
 
+In the planned adapter (in development), PBS message identity (Source ID, Sequence and Timestamp; PBS-ENV-01 has no Message Identifier field) is preserved logically through:
+
+- Deterministic mapping to BPv7 endpoints
+- Optional inclusion in local logging or diagnostics
+
+No BPv7 extension block is required to preserve message identity in the minimum viable mapping.
+
 ---
 
 ## A.9 Inbound Direction (BPv7 to PBS)
@@ -172,6 +215,19 @@ The worked example does not implement the inbound direction. PBS-DTN-MAP-01 Sect
 3. Expiry of the bundle lifetime, as the bundle protocol agent determines it, results in envelope discard. The PBS TTL is not modified. PBS expiry is evaluated against the Timestamp, so time spent in the DTN domain counts toward it (Section 7.3).
 
 The receiving PBS node then processes the envelope in the order of PBS-ENV-01 Section 14: magic, CRC32, priority, TTL, payload. No envelope field is derived from bundle EIDs.
+
+### A.9.1 Planned Reverse Mapping (in development)
+
+When restoring a PBS envelope from a received BPv7 bundle:
+
+1. The Payload Block is extracted as the PBS envelope (44-byte header and payload), verbatim.
+2. Source and Destination EIDs are parsed.
+3. PBS Source and Destination Identifiers are derived, for delivery, using:
+   - The active Authority Context
+   - Local EID parsing rules
+4. The extracted envelope is delivered, unmodified, to the local egress interface (PBS-DTN-MAP-01 Section 7.2).
+
+This process preserves routing identity and payload integrity, with the payload protection of Section A.1.
 
 ---
 
@@ -194,6 +250,12 @@ The receiving PBS node then processes the envelope in the order of PBS-ENV-01 Se
 
 `AuthorityContextMap` raises `ValueError` at construction for an entry that lacks `dest`, `src` or `report_to`, or whose `src` fails Section A.5.3. `build_bpv7_bundle` raises `ValueError` for a `BPv7Primary` whose processing control flags set a flag that RFC 9171 Section 4.2.3 does not assign (Section A.6.3).
 
+### A.10.1 Planned Inbound Error Handling (in development)
+
+If a received BPv7 bundle cannot be mapped unambiguously to a PBS envelope under the active Authority Context, the adapter records the condition and does not emit a restored envelope.
+
+Error signaling behavior is implementation-defined but deterministic.
+
 ---
 
 ## A.11 Verification
@@ -208,3 +270,23 @@ The receiving PBS node then processes the envelope in the order of PBS-ENV-01 Se
 | EID mapping stability | Identical inputs give identical bundle bytes |
 
 The tests also check the bundle and block structure, the primary block CRC32C, the five RFC 7143 Appendix A.4 CRC32C examples, the DTN-millisecond creation time, rejection of corrupted headers and wrong lengths, the source EID rule of Section A.5.3, flag 0x04 for a null source, flag bits 7 and 8 clear for priorities 0 to 4, rejection of reserved and unassigned flags, different creation timestamps for bundles created in one millisecond, a caller-supplied sequence number used as given, and rejection of a negative sequence number and of a default lifetime outside 1 to 4 294 967 295 000 ms. They do not cover priority preservation, store-and-forward delivery, expiry during disruption, duplicate handling or PBS-SEC-B with BPSec, which need a bundle protocol agent.
+
+---
+
+## A.12 Extensibility
+
+Future extensions may introduce:
+
+- Additional BPv7 extension blocks
+- Enhanced identity binding
+- Security-related encapsulation
+
+Such extensions do not alter the correctness of the mapping defined herein.
+
+---
+
+## A.13 Summary
+
+This mapping appendix establishes a clear, deterministic, and standards-aligned method for encapsulating PBS envelopes into BPv7 bundles and restoring them verbatim at the edge.
+
+It is intended to support technical evaluation, interoperability testing, and standards review.
