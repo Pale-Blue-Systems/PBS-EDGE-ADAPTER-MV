@@ -98,7 +98,7 @@ The demonstration shows downlink and uplink delivery, priority mapped to ION's e
 |----------|---------|
 | [`DOCS/PBS-ION-E2E-DEMO.md`](DOCS/PBS-ION-E2E-DEMO.md) | Architecture, how to run, example output, limitations, references |
 | [`DOCS/PBS-ION-MAPPING-PROFILE.md`](DOCS/PBS-ION-MAPPING-PROFILE.md) | Mapping profile and no-expiry lifetime for ION 4.2.0 (PBS-DTN-MAP-01 Sections 6.1.1, 6.3; PBS-DTN-MAP-02 Sections 4, 5) |
-| [`DOCS/PBS-ION-E2E-TEST-PLAN.md`](DOCS/PBS-ION-E2E-TEST-PLAN.md) | Requirements, verification cross-reference matrix, test cases UT-01 to UT-25 and IT-01 to IT-13, procedures and records |
+| [`DOCS/PBS-ION-E2E-TEST-PLAN.md`](DOCS/PBS-ION-E2E-TEST-PLAN.md) | Requirements, verification cross-reference matrix, test cases UT-01 to UT-26 and IT-01 to IT-13, procedures and records |
 
 ```bash
 scripts/build_ion.sh                       # pinned ION release into .ion/install
@@ -108,7 +108,7 @@ python -m pbs_ion_demo                     # the demonstration
 PBS_ION_REQUIRED=1 pytest -v               # all tests, including ION end to end
 ```
 
-`TESTS/test_ion_demo_units.py` (36 tests) runs without ION. `TESTS/ion/test_ion_end_to_end.py` (14 tests) runs against ION and is skipped without it, unless `PBS_ION_REQUIRED=1`. The CI job `ion-e2e` builds ION, runs every test and the demonstration, and keeps the as-run records.
+`TESTS/test_ion_demo_units.py` (37 tests) runs without ION. `TESTS/ion/test_ion_end_to_end.py` (14 tests) runs against ION and is skipped without it, unless `PBS_ION_REQUIRED=1`. The CI job `ion-e2e` builds ION, runs every test and the demonstration, and keeps the as-run records.
 
 ---
 

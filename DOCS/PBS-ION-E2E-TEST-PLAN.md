@@ -1,7 +1,7 @@
 # PBS-ION-E2E-TEST-PLAN: Test Plan, Procedures and Report Format for the ION End-to-End Demonstration
 
 **Item under test:** `pbs_ion_demo` (PBS gateway functions, link emulator, BPv7 wire decoder) with NASA/JPL ION `ion-open-source-4.2.0`, commit `568df887cb9f18aa8ec013b1a566d83215e499ae`.
-**Test code:** `TESTS/test_ion_demo_units.py` (UT-01 to UT-25) and `TESTS/ion/test_ion_end_to_end.py` (IT-01 to IT-13).
+**Test code:** `TESTS/test_ion_demo_units.py` (UT-01 to UT-26) and `TESTS/ion/test_ion_end_to_end.py` (IT-01 to IT-13).
 **Related documents:** [PBS-ION-E2E-DEMO.md](PBS-ION-E2E-DEMO.md) (demonstration), [PBS-ION-MAPPING-PROFILE.md](PBS-ION-MAPPING-PROFILE.md) (mapping profile).
 
 This document combines a software test plan, the test procedures and the test report format. Its content follows the NASA Software Engineering Handbook (NASA-HDBK-2203) topics 5.10 *Software Test Plan*, 5.14 *Software Test Procedures* and 5.11 *Software Test Report* [N4]. Each test case lists its requirements and verification method, and the matrix in Section 5 traces both ways between requirements and test cases, as NPR 7150.2D SWE-052 requires for requirements and tests [N1]. The test code is the executable procedure. Each test function's docstring repeats the requirement, method, procedure and pass criteria given here. Pale Blue Systems is not a NASA project and claims no compliance with NPR 7150.2D. The NASA documents are cited as the model the plan follows.
@@ -79,7 +79,7 @@ Methods are those of NASA/SP-2016-6105 Rev 2 §5.3 [N3]: **T** test, **D** demon
 | R-14 | IT-11, UT-24 | I |
 | R-15 | IT-13, UT-25 | T |
 
-Reverse trace (test case → requirements): IT-01 R-01–R-03; IT-02 R-01, R-02, R-04, R-06–R-08; IT-03 R-01, R-07; IT-04 R-02; IT-05 R-02, R-03, R-07; IT-06 R-13; IT-07 R-09; IT-08 R-04; IT-09 R-10; IT-10 R-11; IT-11 R-14; IT-12 R-05; IT-13 R-15. UT-01–UT-09 verify the wire decoder that IT-02, IT-03 and IT-05 use as their measuring instrument. UT-20–UT-23 verify the generated ION configuration and the link emulator.
+Reverse trace (test case → requirements): IT-01 R-01–R-03; IT-02 R-01, R-02, R-04, R-06–R-08; IT-03 R-01, R-07; IT-04 R-02; IT-05 R-02, R-03, R-07; IT-06 R-13; IT-07 R-09; IT-08 R-04; IT-09 R-10; IT-10 R-11; IT-11 R-14; IT-12 R-05; IT-13 R-15. UT-01–UT-09 verify the wire decoder that IT-02, IT-03 and IT-05 use as their measuring instrument. UT-20–UT-23 verify the generated ION configuration and the link emulator. UT-26 verifies the evidence records in the demonstration report.
 
 ## 6. Test cases
 
@@ -128,6 +128,7 @@ Unless stated otherwise, IT preconditions are: the ION release of Section 2 is i
 | UT-23 | Emulator delays by the OWLT, preserves order and records each datagram |
 | UT-24 | Release pin identical in the build script and the Python package |
 | UT-25 | Shared-memory keys distinct, unused by any existing segment, and in the harness's range |
+| UT-26 | The envelope and bundle records in the demonstration's `report.json` restate the decoded bytes exactly |
 
 ### 6.1 Measurement independence
 

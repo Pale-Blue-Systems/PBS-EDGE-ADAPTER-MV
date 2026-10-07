@@ -386,3 +386,28 @@ def test_ut25_allocated_keys_are_distinct_and_unused():
     assert len(set(values)) == 4
     assert not (set(values) & (existing | exclude))
     assert all(0x10000000 <= v < 0x70000000 for v in values)
+
+
+# -----------------------------
+# UT-26: demonstration report records
+# -----------------------------
+
+def test_ut26_report_records_match_the_envelope_and_bundle():
+    """report.json evidence (python -m pbs_ion_demo) restates the decoded bytes exactly."""
+    from pbs_ion_demo.__main__ import bundle_record, envelope_record
+
+    env = envelope(120, Priority.HIGH, b"VOLTAGE=119.7")
+    e = envelope_record(env)
+    assert bytes.fromhex(e["hex"]) == env
+    assert (e["source_id"], e["priority"], e["priority_value"], e["ttl_s"]) == ("TEST-ROVER", "HIGH", 1, 120)
+    assert e["timestamp_unix_us"] == T0_US and e["payload_text"] == "VOLTAGE=119.7"
+    assert e["bytes"] == 44 + e["payload_bytes"]
+
+    raw = pbs_to_bpv7_bundle_mv(env, "luna", AC_MAP, creation_seq=7, clock_us=lambda: T0_US)
+    b = bundle_record(raw)
+    assert bytes.fromhex(b["hex"]) == raw and b["bytes"] == len(raw)
+    assert (b["source"], b["destination"], b["report_to"]) == ("ipn:1.0", "ipn:2.2", "ipn:1.0")
+    assert b["creation_unix_ms"] == T0_S * 1000 and b["creation_seq"] == 7
+    assert b["expiry_unix_ms"] == T0_S * 1000 + b["lifetime_ms"]
+    assert b["blocks"] == [{"type": 1, "number": 1, "flags": 0, "crc_type": 0, "data_bytes": len(env)}]
+    assert b["ion_class_of_service"] is None and "link" not in b
