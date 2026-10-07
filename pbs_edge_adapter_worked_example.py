@@ -8,14 +8,16 @@ Bundle Protocol Version 7 bundle (IETF RFC 9171):
      byte other than 0x10, a header CRC32 mismatch, a reserved priority
      (5-255) and a payload shorter than the Size field (PBS-ENV-01 Sections
      13 and 14). Reject input longer than 44 + Size bytes.
-  2. Reject an envelope whose TTL has expired and bound the bundle lifetime
-     by the TTL that remains (PBS-ENV-01 Section 12; PBS-DTN-MAP-02
-     Section 4).
+  2. Reject an envelope whose TTL has expired or has less than 1 ms left.
+     Bound the bundle lifetime by the TTL that remains; for TTL 0 use the
+     configured no-expiry lifetime (PBS-ENV-01 Section 12; PBS-DTN-MAP-01
+     Sections 6.1 and 6.1.1; PBS-DTN-MAP-02 Section 4).
   3. Take the destination EID, source node ID and report-to EID from the
      Authority Context map entry named by the caller.
   4. Build the primary block (RFC 9171 Section 4.3.1): creation time in DTN
-     milliseconds (Sections 4.2.6, 4.2.7) and a CRC32C (Sections 4.2.1,
-     4.2.2).
+     milliseconds (Sections 4.2.6, 4.2.7), a sequence number from the
+     adapter's CreationTimestampCounter unless the caller supplies one
+     (Section 4.2.7), and a CRC32C (Sections 4.2.1, 4.2.2).
   5. Place the complete envelope, header and payload, unmodified in the
      payload block (RFC 9171 Section 4.3.2; PBS-DTN-MAP-01 Section 6.2).
 
@@ -27,9 +29,10 @@ from __future__ import annotations
 
 import datetime
 import struct
+import threading
 import time
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Tuple, Union
+from typing import Any, Callable, Dict, Optional, Tuple, Union
 
 import cbor2
 from PBS_LINK import HEADER_SIZE, PBSEnvelope, Priority, build_envelope, parse_envelope
@@ -174,6 +177,9 @@ class AuthorityContextMap:
     EID, already encoded as BPv7 EIDs. The PBS-ENV-01 v1.3 header has no
     destination, authority or scope field, so no envelope field contributes
     to these values. The caller names the context for each envelope.
+
+    In a full Edge Adapter, these would be sourced from the PBS Authority Context registry
+    and deployment config. This MV just demonstrates deterministic selection.
     """
     table: Dict[str, Dict[str, EID]]
 
@@ -207,6 +213,14 @@ class AuthorityContextMap:
 # report request flag.
 BPF_MUST_NOT_FRAGMENT = 0x000004
 
+# Bundle processing control flags RFC 9171 Section 4.2.3 assigns: bits 0-2,
+# 5, 6, 14 and 16-18. Bits 3-4, 7-13, 15 and 19-20 are reserved and bits
+# 21-63 unassigned. PBS-DTN-MAP-01 Section 6.3 forbids conveying PBS
+# priority in reserved or unassigned flags, including bits 7 and 8
+# (0x000180), which carry the class of service in Bundle Protocol version 6
+# (RFC 5050 Section 4.2). BPv7Primary rejects any flag outside this mask.
+BPF_ASSIGNED_MASK = 0x074067
+
 
 @dataclass(frozen=True)
 class BPv7Primary:
@@ -226,6 +240,12 @@ class BPv7Primary:
     crc_type: int = 2              # 2 = CRC32C (RFC 9171 Section 4.2.1)
 
     def to_cbor_with_crc_placeholder(self) -> list[Any]:
+        if self.bundle_proc_flags & ~BPF_ASSIGNED_MASK:
+            raise ValueError(
+                f"Bundle processing control flags 0x{self.bundle_proc_flags:06x} set a reserved "
+                "or unassigned flag (RFC 9171 Section 4.2.3); PBS priority is not conveyed "
+                "in them (PBS-DTN-MAP-01 Section 6.3)"
+            )
         if self.crc_type == 0:
             raise ValueError(
                 "Primary block CRC type must be non-zero unless a BPSec BIB targets "
@@ -317,6 +337,10 @@ def build_bpv7_bundle(primary: BPv7Primary, payload_block: BPv7PayloadBlock) -> 
 # 2000-01-01 (IERS Leap_Second.dat: TAI-UTC 32 s from 1999-01-01, 37 s from
 # 2017-01-01), so this value is 5000 ms less than a count of elapsed SI
 # milliseconds.
+# NOTE: This reference example approximates DTN time by offsetting Unix time.
+# Production gateways MUST take the creation timestamp from the gateway's
+# bundle protocol agent (PBS-DTN-MAP-01 Section 6.1), with DTN time derived
+# from a proper TAI-based clock source.
 DTN_EPOCH_UNIX_MS = 946_684_800_000
 
 
@@ -338,9 +362,57 @@ def unix_us_to_dtn_ms(unix_us: int) -> int:
     return dtn_ms
 
 
+class CreationTimestampCounter:
+    """
+    Creation timestamp sequence numbers for one adapter (RFC 9171 Section
+    4.2.7).
+
+    RFC 9171 Section 4.2.7 takes the sequence number from a monotonically
+    increasing counter managed by the source node's bundle protocol agent,
+    which "MAY be reset to zero whenever the current time advances by one
+    millisecond". next_seq(t) returns 0 for the first bundle whose creation
+    time t is later than every creation time it has seen, and the previous
+    value plus 1 for each further bundle, so two bundles created in the same
+    millisecond get different creation timestamps. If the clock steps back,
+    the counter is not reset; a creation timestamp issued before the step
+    can then recur.
+
+    One adapter holds one counter and uses it for every bundle it creates.
+    The counter never reads the envelope Sequence field (PBS-DTN-MAP-01
+    Section 6.1). Calls from several threads are serialized.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._latest_ms: Optional[int] = None
+        self._seq = 0
+
+    def next_seq(self, creation_time_dtn: int) -> int:
+        """Return the sequence number for a bundle created at creation_time_dtn (DTN ms)."""
+        with self._lock:
+            if self._latest_ms is None or creation_time_dtn > self._latest_ms:
+                self._latest_ms = creation_time_dtn
+                self._seq = 0
+            else:
+                self._seq += 1
+            return self._seq
+
+
+# Counter used by pbs_to_bpv7_bundle_mv when the caller passes neither
+# creation_seq nor sequence_counter: the counter of the one adapter a
+# process runs.
+ADAPTER_SEQUENCE_COUNTER = CreationTimestampCounter()
+
+
 # -----------------------------
-# Lifetime (PBS-DTN-MAP-02 Section 4; PBS-ENV-01 Section 12)
+# Lifetime (PBS-DTN-MAP-01 Sections 6.1 and 6.1.1; PBS-DTN-MAP-02 Section 4;
+# PBS-ENV-01 Section 12)
 # -----------------------------
+
+# Largest no-expiry lifetime PBS-DTN-MAP-01 Section 6.1.1 and PBS-DTN-MAP-02
+# Section 4 permit: 4 294 967 295 000 ms, the largest TTL (2^32 - 1 s) in
+# milliseconds.
+MAX_NO_EXPIRY_LIFETIME_MS = 4_294_967_295_000
 
 class EdgeAdapterError(Exception):
     """An envelope this example refuses to encapsulate."""
@@ -352,7 +424,8 @@ class EnvelopeExpiredError(EdgeAdapterError):
 
     Raised when the envelope has expired (age > TTL, PBS-ENV-01 Section
     12.2), which gateways MUST discard (Sections 12.1 and 15), and when less
-    than 1 ms of the TTL remains.
+    than 1 ms of the TTL remains, which PBS-DTN-MAP-01 Section 6.1 forbids
+    encapsulating.
     """
 
 
@@ -362,27 +435,43 @@ class EnvelopeLengthError(EdgeAdapterError):
 
 def bundle_lifetime_ms(envelope: PBSEnvelope, now_us: int, default_lifetime_ms: int) -> int:
     """
-    Select the bundle lifetime per PBS-DTN-MAP-02 Section 4.
+    Select the bundle lifetime (PBS-DTN-MAP-01 Sections 6.1 and 6.1.1;
+    PBS-DTN-MAP-02 Section 4).
 
-    TTL 0: the envelope never expires (PBS-ENV-01 Section 12.1). Neither
-    PBS-DTN-MAP-01 nor PBS-DTN-MAP-02 defines a bundle lifetime for TTL 0;
-    return default_lifetime_ms. When the bundle's age exceeds it, the BP
-    agent deletes the bundle (RFC 9171 Section 5.5) and the envelope is
-    discarded with it (PBS-DTN-MAP-01 Section 7.3).
+    default_lifetime_ms is the no-expiry lifetime: an integer from 1 to
+    4_294_967_295_000 ms (PBS-DTN-MAP-01 Section 6.1.1). A deployment also
+    selects a value that its bundle protocol agent accepts and for which
+    the agent computes creation time + lifetime without overflow (Section
+    6.1.1); this example connects to no agent and does not check that.
+
+    TTL 0: the envelope never expires (PBS-ENV-01 Section 12.1). This
+    example reads no Service Intent frame and no mission expiry policy, so
+    it applies no PBS-DTN-MAP-02 Section 4 finite limit; return
+    default_lifetime_ms (PBS-DTN-MAP-01 Section 6.1.1). When the bundle's
+    age exceeds it, the BP agent deletes the bundle (RFC 9171 Section 5.5)
+    and the envelope with it. That deletion is not TTL expiry
+    (PBS-DTN-MAP-01 Sections 6.1.1 and 7.3).
 
     TTL > 0: the envelope expires at Timestamp + TTL (PBS-ENV-01 Section
     12.2). Return min(default_lifetime_ms, remaining_ms), where
-      remaining_ms = TTL * 1000 - age_ms
-      age_ms       = max(0, now_us - Timestamp) in milliseconds, rounded up.
-    Rounding the age up keeps creation time + lifetime at or before the PBS
-    expiry instant when both are taken from now_us. A Timestamp later than
-    now_us gives age 0, so the lifetime never exceeds TTL * 1000.
+      remaining_ms = (TTL * 1_000_000 - age_us) // 1000
+      age_us       = max(0, now_us - Timestamp)
+    This is the PBS-DTN-MAP-01 Section 6.1 bound computed with now_us in
+    place of the creation time: the creation time is now_us truncated to
+    whole milliseconds, so it is not later than now_us and the bundle
+    expires no later than the envelope. A Timestamp later than now_us
+    gives age 0, so the lifetime never exceeds TTL * 1000. The result never
+    exceeds default_lifetime_ms, the TTL 0 lifetime (Section 6.1.1).
 
-    Raises EnvelopeExpiredError if remaining_ms <= 0, and ValueError if
-    default_lifetime_ms <= 0.
+    Raises EnvelopeExpiredError if remaining_ms < 1 (PBS-DTN-MAP-01
+    Section 6.1), and ValueError if default_lifetime_ms is outside
+    1..4_294_967_295_000.
     """
-    if default_lifetime_ms <= 0:
-        raise ValueError("default_lifetime_ms must be positive")
+    if not 1 <= default_lifetime_ms <= MAX_NO_EXPIRY_LIFETIME_MS:
+        raise ValueError(
+            f"default_lifetime_ms must be 1 to {MAX_NO_EXPIRY_LIFETIME_MS} ms "
+            "(PBS-DTN-MAP-01 Section 6.1.1)"
+        )
     if envelope.ttl == 0:
         return default_lifetime_ms
 
@@ -409,8 +498,9 @@ def pbs_to_bpv7_bundle_mv(
     authority_context: str,
     authority_map: AuthorityContextMap,
     default_lifetime_ms: int = 60_000,
-    creation_seq: int = 1,
+    creation_seq: Optional[int] = None,
     clock_us: Callable[[], int] = unix_time_us,
+    sequence_counter: Optional[CreationTimestampCounter] = None,
 ) -> bytes:
     """
     Encapsulate one PBS-ENV-01 v1.3 envelope in one BPv7 bundle.
@@ -418,25 +508,32 @@ def pbs_to_bpv7_bundle_mv(
     pbs_envelope_bytes   complete envelope: 44-byte header + Size payload bytes
     authority_context    name of the Authority Context map entry to use
     authority_map        Authority Context map (adapter configuration)
-    default_lifetime_ms  configured bundle lifetime, used when TTL is 0 and as
-                         the upper bound otherwise
+    default_lifetime_ms  no-expiry lifetime, 1 to 4_294_967_295_000 ms: the
+                         bundle lifetime when TTL is 0 and the upper bound
+                         otherwise (PBS-DTN-MAP-01 Section 6.1.1)
     creation_seq         creation timestamp sequence number, a non-negative
-                         integer (RFC 9171 Section 4.2.7); a BP agent supplies
-                         it from its own counter
+                         integer (RFC 9171 Section 4.2.7), used as given; the
+                         caller then keeps the creation timestamps unique.
+                         None (default): take it from sequence_counter
     clock_us             returns Unix time in microseconds; read once, for both
                          the creation time and the envelope age
+    sequence_counter     the adapter's CreationTimestampCounter, used when
+                         creation_seq is None; None (default) uses
+                         ADAPTER_SEQUENCE_COUNTER
 
     The bundle processing control flags are 0, or 0x04 ("bundle must not be
     fragmented") when the source is the null endpoint (RFC 9171 Section 4.2.3).
+    No primary block field or flag carries the envelope Priority
+    (PBS-DTN-MAP-01 Sections 6.1 and 6.3); it travels in the envelope.
 
     Raises PBS_LINK.PBSValidationError or a subclass (PBSMagicError,
     PBSCRCError, PBSPriorityError) for an invalid or truncated envelope,
     EnvelopeLengthError for trailing bytes, EnvelopeExpiredError, KeyError
     for an unknown authority context, and ValueError for a negative
-    creation_seq, a non-positive default_lifetime_ms, or a clock reading at
-    or before the DTN epoch.
+    creation_seq, a default_lifetime_ms outside 1..4_294_967_295_000, or a
+    clock reading at or before the DTN epoch.
     """
-    if creation_seq < 0:
+    if creation_seq is not None and creation_seq < 0:
         raise ValueError("creation_seq must be a non-negative integer (RFC 9171 Section 4.2.7)")
 
     envelope = parse_envelope(pbs_envelope_bytes)
@@ -450,12 +547,18 @@ def pbs_to_bpv7_bundle_mv(
 
     now_us = clock_us()
     lifetime_ms = bundle_lifetime_ms(envelope, now_us, default_lifetime_ms)
+    # RFC 9171 DTN time is seconds since 2000-01-01T00:00:00Z (DTN epoch),
+    # but implementations often supply DTN time via local BP stack.
+    creation_time_dtn = unix_us_to_dtn_ms(now_us)
+    if creation_seq is None:
+        counter = ADAPTER_SEQUENCE_COUNTER if sequence_counter is None else sequence_counter
+        creation_seq = counter.next_seq(creation_time_dtn)
 
     primary = BPv7Primary(
         destination=dest,
         source=src,
         report_to=rpt,
-        creation_time_dtn=unix_us_to_dtn_ms(now_us),
+        creation_time_dtn=creation_time_dtn,
         creation_seq=creation_seq,
         lifetime_ms=lifetime_ms,
         bundle_proc_flags=BPF_MUST_NOT_FRAGMENT if is_null_endpoint(src) else 0,
@@ -511,14 +614,15 @@ if __name__ == "__main__":
     print(f"Envelope header (hex): {envelope_bytes[:HEADER_SIZE].hex()}")
 
     # 3) Encapsulate. The configured default (300 000 ms) exceeds the
-    #    envelope's 120 s TTL, so the remaining TTL sets the lifetime.
+    #    envelope's 120 s TTL, so the remaining TTL sets the lifetime. No
+    #    creation_seq is passed, so ADAPTER_SEQUENCE_COUNTER assigns the
+    #    creation timestamp sequence number.
     default_lifetime_ms = 300_000
     bundle_bytes = pbs_to_bpv7_bundle_mv(
         pbs_envelope_bytes=envelope_bytes,
         authority_context="pbsf.luna.ops",
         authority_map=ac_map,
         default_lifetime_ms=default_lifetime_ms,
-        creation_seq=42,
     )
 
     print("\nBPv7 bundle (hex):")

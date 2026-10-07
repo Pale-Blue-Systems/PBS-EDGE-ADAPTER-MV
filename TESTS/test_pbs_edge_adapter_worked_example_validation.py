@@ -25,6 +25,7 @@ from pbs_edge_adapter_worked_example import (
     AuthorityContextMap,
     BPv7PayloadBlock,
     BPv7Primary,
+    CreationTimestampCounter,
     EnvelopeExpiredError,
     EnvelopeLengthError,
     build_bpv7_bundle,
@@ -53,18 +54,25 @@ AC_MAP = AuthorityContextMap(
 )
 
 
-def make_envelope(ttl: int, payload: bytes = b"VOLTAGE=120.0") -> bytes:
+def make_envelope(
+    ttl: int, payload: bytes = b"VOLTAGE=120.0", priority: Priority = Priority.NORMAL
+) -> bytes:
     """PBS-ENV-01 v1.3 envelope from PBS_LINK with Timestamp = T0_US."""
     link = PBSLink(device_id="TEST-ROVER", clock_source=lambda: T0_S)
-    return link.send(Priority.NORMAL, payload, ttl=ttl)
+    return link.send(priority, payload, ttl=ttl)
 
 
-def encapsulate(envelope_bytes: bytes, now_us: int, creation_seq: int = 42) -> bytes:
+def encapsulate(
+    envelope_bytes: bytes,
+    now_us: int,
+    creation_seq: int = 42,
+    default_lifetime_ms: int = DEFAULT_LIFETIME_MS,
+) -> bytes:
     return pbs_to_bpv7_bundle_mv(
         envelope_bytes,
         "pbsf.luna.ops",
         AC_MAP,
-        default_lifetime_ms=DEFAULT_LIFETIME_MS,
+        default_lifetime_ms=default_lifetime_ms,
         creation_seq=creation_seq,
         clock_us=lambda: now_us,
     )
@@ -184,6 +192,35 @@ def test_converted_bundle_primary_block_and_crc():
     assert bytes(primary_block[8]) == _recompute_primary_crc32c(primary_block)
 
 
+@pytest.mark.parametrize("priority", list(Priority))
+def test_priority_sets_no_processing_control_flag(priority):
+    # PBS-DTN-MAP-01 Section 6.3: no reserved or unassigned flag, including
+    # bits 7 and 8 (0x180), conveys PBS priority. Priority stays in the
+    # envelope header (offset 0x01) inside the payload block.
+    envelope = make_envelope(ttl=30, priority=priority)
+    bundle = cbor2.loads(encapsulate(envelope, now_us=T0_US))
+    assert bundle[0][1] & 0x180 == 0
+    assert bundle[-1][4][1] == priority
+
+
+@pytest.mark.parametrize("flags", [0x000080, 0x000100, 0x000180, 0x000008, 0x200000])
+def test_reserved_or_unassigned_processing_control_flag_is_rejected(flags):
+    # RFC 9171 Section 4.2.3: bits 3-4, 7-13, 15 and 19-20 are reserved and
+    # bits 21-63 unassigned.
+    dest, src, rpt = AC_MAP.resolve("pbsf.luna.ops")
+    primary = BPv7Primary(
+        destination=dest,
+        source=src,
+        report_to=rpt,
+        creation_time_dtn=123456,
+        creation_seq=0,
+        lifetime_ms=1000,
+        bundle_proc_flags=flags,
+    )
+    with pytest.raises(ValueError):
+        build_bpv7_bundle(primary, BPv7PayloadBlock(payload=make_envelope(ttl=30)))
+
+
 # -----------------------------
 # Creation time: DTN milliseconds (RFC 9171 Sections 4.2.6, 4.2.7)
 # -----------------------------
@@ -207,6 +244,57 @@ def test_negative_creation_seq_is_rejected():
     assert cbor2.loads(encapsulate(make_envelope(ttl=0), now_us=T0_US, creation_seq=0))[0][6][1] == 0
 
 
+def creation_timestamp(envelope: bytes, now_us: int, **kwargs) -> list:
+    bundle = pbs_to_bpv7_bundle_mv(
+        envelope, "pbsf.luna.ops", AC_MAP, clock_us=lambda: now_us, **kwargs
+    )
+    return cbor2.loads(bundle)[0][6]
+
+
+def test_bundles_in_same_millisecond_get_different_creation_timestamps():
+    # RFC 9171 Section 4.2.7: the sequence number comes from a counter that
+    # MAY be reset to zero when the time advances by one millisecond.
+    # T0 + 1 ms is DTN time 820_540_800_001 ms.
+    counter = CreationTimestampCounter()
+    envelope = make_envelope(ttl=30)
+    stamps = [
+        creation_timestamp(envelope, T0_US + 1_000, sequence_counter=counter),
+        creation_timestamp(envelope, T0_US + 1_999, sequence_counter=counter),  # same ms
+        creation_timestamp(envelope, T0_US + 1_500, sequence_counter=counter),  # same ms
+        creation_timestamp(envelope, T0_US + 2_000, sequence_counter=counter),  # next ms
+    ]
+    assert stamps == [
+        [820_540_800_001, 0],
+        [820_540_800_001, 1],
+        [820_540_800_001, 2],
+        [820_540_800_002, 0],
+    ]
+
+
+def test_adapter_counter_is_used_when_no_sequence_is_supplied():
+    envelope = make_envelope(ttl=30)
+    first = creation_timestamp(envelope, T0_US + 3_000)
+    second = creation_timestamp(envelope, T0_US + 3_000)
+    assert first[0] == second[0] == 820_540_800_003
+    assert first != second
+
+
+def test_caller_supplied_creation_seq_is_honoured():
+    # A supplied creation_seq is used as given and does not advance the
+    # adapter's counter.
+    counter = CreationTimestampCounter()
+    envelope = make_envelope(ttl=30)
+    assert creation_timestamp(envelope, T0_US, creation_seq=42, sequence_counter=counter) == [
+        820_540_800_000,
+        42,
+    ]
+    assert creation_timestamp(envelope, T0_US, creation_seq=42, sequence_counter=counter) == [
+        820_540_800_000,
+        42,
+    ]
+    assert creation_timestamp(envelope, T0_US, sequence_counter=counter) == [820_540_800_000, 0]
+
+
 def test_clock_at_or_before_dtn_epoch_is_rejected():
     with pytest.raises(ValueError):
         unix_us_to_dtn_ms(DTN_EPOCH_UNIX_MS * 1000)
@@ -214,11 +302,15 @@ def test_clock_at_or_before_dtn_epoch_is_rejected():
 
 
 # -----------------------------
-# Lifetime (PBS-DTN-MAP-02 Section 4; PBS-ENV-01 Section 12)
+# Lifetime (PBS-DTN-MAP-01 Sections 6.1 and 6.1.1; PBS-DTN-MAP-02 Section 4;
+# PBS-ENV-01 Section 12)
 # -----------------------------
 
-def lifetime_of(ttl: int, age_us: int) -> int:
-    return cbor2.loads(encapsulate(make_envelope(ttl), now_us=T0_US + age_us))[0][7]
+def lifetime_of(ttl: int, age_us: int, default_lifetime_ms: int = DEFAULT_LIFETIME_MS) -> int:
+    bundle = encapsulate(
+        make_envelope(ttl), now_us=T0_US + age_us, default_lifetime_ms=default_lifetime_ms
+    )
+    return cbor2.loads(bundle)[0][7]
 
 
 def test_ttl_zero_uses_configured_default():
@@ -270,6 +362,26 @@ def test_non_positive_default_lifetime_is_rejected(default_lifetime_ms):
             default_lifetime_ms=default_lifetime_ms,
             clock_us=lambda: T0_US,
         )
+
+
+def test_no_expiry_lifetime_is_at_most_4294967295000_ms():
+    # PBS-DTN-MAP-01 Section 6.1.1 and PBS-DTN-MAP-02 Section 4: the
+    # no-expiry lifetime does not exceed 4 294 967 295 000 ms, the largest
+    # TTL (4 294 967 295 s) in milliseconds.
+    assert lifetime_of(ttl=0, age_us=0, default_lifetime_ms=4_294_967_295_000) == 4_294_967_295_000
+    for ttl in (0, 30):
+        with pytest.raises(ValueError):
+            lifetime_of(ttl, age_us=0, default_lifetime_ms=4_294_967_296_000)
+
+
+@pytest.mark.parametrize("default_lifetime_ms", [1, DEFAULT_LIFETIME_MS, 4_294_967_295_000])
+def test_ttl_zero_lifetime_is_not_less_than_any_finite_ttl_lifetime(default_lifetime_ms):
+    # PBS-DTN-MAP-01 Section 6.1.1: the no-expiry lifetime is not less than
+    # the lifetime the gateway assigns to any envelope with TTL > 0.
+    ttl_zero_lifetime = lifetime_of(ttl=0, age_us=0, default_lifetime_ms=default_lifetime_ms)
+    for ttl in (1, 30, 3600, 86_400, 4_294_967_295):
+        for age_us in (-3_600_000_000, 0, 500_000):
+            assert lifetime_of(ttl, age_us, default_lifetime_ms) <= ttl_zero_lifetime
 
 
 @pytest.mark.parametrize("age_us", [0, 1, 999, 1_000, 12_500_500, 29_000_001, 29_999_000])
