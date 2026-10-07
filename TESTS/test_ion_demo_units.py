@@ -47,7 +47,7 @@ from pbs_ion_demo.ion_gateway import (
     plan_submission,
     restore_envelope,
 )
-from pbs_ion_demo.ion_node import Contact, IonNode, ion_utc
+from pbs_ion_demo.ion_node import Contact, IonNode, allocate_keys, ion_utc, shm_segments
 from pbs_ion_demo.link_emulator import (
     EARTH_MOON_OWLT_S,
     LinkChannel,
@@ -223,12 +223,18 @@ def test_ut14_expired_envelope_is_refused():
 
 
 def test_ut15_ttl_zero_gets_ion_no_expiry_lifetime():
-    """TTL 0: 2 147 483 647 s, the largest lifetime ION bp_send accepts (an int)."""
+    """
+    TTL 0: 2 147 483 647 s = 2^31 - 1, the largest value of bp_send's int
+    lifespan; within the 4 294 967 295 000 ms limit of Section 6.1.1. The
+    largest TTL is capped to the same value, since bp_send cannot express
+    more; smaller TTLs are not capped.
+    """
     p = plan_submission(envelope(0), T0_US)
-    assert ION_NO_EXPIRY_LIFETIME_MS == 2_147_483_647_000
-    assert p.lifespan_s == 2_147_483_647
-    # Not less than the lifetime of any TTL > 0 envelope (Section 6.1.1).
-    assert plan_submission(envelope(4_294_967_295), T0_US).lifespan_s <= p.lifespan_s
+    assert ION_NO_EXPIRY_LIFETIME_MS == (2**31 - 1) * 1000
+    assert ION_NO_EXPIRY_LIFETIME_MS <= 4_294_967_295_000
+    assert p.lifespan_s == 2**31 - 1
+    assert plan_submission(envelope(4_294_967_295), T0_US, max_submit_latency_us=0).lifespan_s == 2**31 - 1
+    assert plan_submission(envelope(2**31 - 2), T0_US, max_submit_latency_us=0).lifespan_s == 2**31 - 2
 
 
 def test_ut16_priority_to_ion_class_follows_section_6_3_table():
@@ -292,10 +298,13 @@ def test_ut20_ion_utc_format():
 
 
 def test_ut21_node_configuration_files(tmp_path):
-    node = IonNode(1, tmp_path, 40001, {2: 40003}, 71234, "pbsion1")
+    keys = {"wmKey": 0x10000001, "sdrWmKey": 0x10000002, "heapKey": 0x10000003, "logKey": 0x10000004}
+    node = IonNode(1, tmp_path, 40001, {2: 40003}, keys, "pbsion1")
     contact = Contact(1, 2, T0_S, T0_S + 600, 125_000, 2)
     files = node.render([contact])
-    assert files["node.ionconfig"].splitlines()[:2] == ["wmKey 71234", "sdrName pbsion1"]
+    cfg = files["node.ionconfig"].splitlines()
+    assert cfg[:2] == [f"wmKey {0x10000001}", "sdrName pbsion1"]
+    assert {f"sdrWmKey {0x10000002}", f"heapKey {0x10000003}", f"logKey {0x10000004}"} <= set(cfg)
     assert "a contact 2026/01/01-00:00:00 2026/01/01-00:10:00 1 2 125000" in files["node.ionrc"]
     assert "a range 2026/01/01-00:00:00 2026/01/01-00:10:00 1 2 2" in files["node.ionrc"]
     bprc = files["node.bprc"].splitlines()
@@ -339,6 +348,7 @@ def test_ut23_channel_delays_and_captures_in_order():
     assert got == [b"first", b"second", b"third"]
     assert elapsed >= owlt
     assert [c.data for c in caps] == got
+    assert [c.injected for c in caps] == [False, False, True]
     assert all(c.release_unix_ns - c.arrival_unix_ns >= int(owlt * 1e9) for c in caps)
 
 
@@ -361,3 +371,18 @@ def test_ut24_release_pin_matches_build_script():
     assert env["ION_RELEASE_TAG"] == ion_release.ION_RELEASE_TAG
     assert env["ION_RELEASE_COMMIT"] == ion_release.ION_RELEASE_COMMIT
     assert len(ion_release.ION_RELEASE_COMMIT) == 40
+
+
+# -----------------------------
+# UT-25: shared-memory keys
+# -----------------------------
+
+def test_ut25_allocated_keys_are_distinct_and_unused():
+    existing = set(shm_segments())
+    exclude = {0x10000000 + i for i in range(1000)}
+    keys = allocate_keys(("wmKey", "sdrWmKey", "heapKey", "logKey"), exclude)
+    values = list(keys.values())
+    assert sorted(keys) == ["heapKey", "logKey", "sdrWmKey", "wmKey"]
+    assert len(set(values)) == 4
+    assert not (set(values) & (existing | exclude))
+    assert all(0x10000000 <= v < 0x70000000 for v in values)

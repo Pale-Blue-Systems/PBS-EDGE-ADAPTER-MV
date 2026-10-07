@@ -26,7 +26,6 @@ from pbs_edge_adapter_worked_example import (
     DTN_EPOCH_UNIX_MS,
     AuthorityContextMap,
     CreationTimestampCounter,
-    EnvelopeExpiredError,
     eid_ipn,
     pbs_to_bpv7_bundle_mv,
 )
@@ -39,6 +38,8 @@ from pbs_ion_demo.bpv7_wire import (
     item_end,
     reserved_flags_set,
 )
+from pbs_ion_demo.ion_gateway import ION_NO_EXPIRY_LIFETIME_MS, IonLifetimeGranularityError
+from pbs_ion_demo.ion_node import shm_segments
 from pbs_ion_demo.ion_release import ION_VERSION_STRING
 from pbs_ion_demo.scenario import ContactWindow, LunarEarthNetwork, always_open
 
@@ -69,17 +70,42 @@ def rover_link() -> PBSLink:
 
 
 def captures_of(channel, envelope_bytes: bytes, expected: int = 1, timeout_s: float = DELIVERY_TIMEOUT_S):
-    """(capture, decoded bundle) pairs whose payload is envelope_bytes."""
+    """
+    (capture, decoded bundle) pairs, for bundles a node put on the link,
+    whose payload is envelope_bytes. Every such capture must decode: a
+    malformed bundle from ION fails the test. Bytes a test injected itself
+    (IT-06, IT-07) are not considered.
+    """
     deadline = time.monotonic() + timeout_s
     while True:
         found = []
         for c in channel.captures():
+            if c.injected:
+                continue
             b = decode_bundle(c.data)
             if b.payload == envelope_bytes:
                 found.append((c, b))
         if len(found) >= expected or time.monotonic() >= deadline:
             return found
         time.sleep(0.05)
+
+
+def deliveries_of(gateway, envelopes, timeout_s: float = DELIVERY_TIMEOUT_S):
+    """
+    Deliveries at gateway of the given envelopes, collected until each has
+    arrived or timeout_s has passed. A delivery of any other envelope (for
+    example one left by an earlier failed test) is collected and ignored,
+    so one test's failure cannot pass or fail another.
+    """
+    wanted = set(envelopes)
+    got = []
+    deadline = time.monotonic() + timeout_s
+    while not wanted <= {d.envelope_bytes for d in got}:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        got += [d for d in gateway.receive(1, min(remaining, 1.0)) if d.envelope_bytes in wanted]
+    return got
 
 
 @pytest.fixture(scope="module")
@@ -120,7 +146,7 @@ def test_it01_downlink_envelope_delivered_verbatim(open_net, evidence):
     net = open_net
     env = rover_link().send(Priority.NORMAL, b"VOLTAGE=119.7,CURRENT=18.2,TEMP=-41.5", ttl=120)
     sub = net.lunar.submit(env, net.earth.receive_eid)
-    deliveries = net.earth.receive(1, DELIVERY_TIMEOUT_S)
+    deliveries = deliveries_of(net.earth, [env])
     caps = captures_of(net.emulator["1->2"], env)
 
     assert len(deliveries) == 1
@@ -175,7 +201,7 @@ def test_it02_ion_bundle_conforms_and_respects_envelope_ttl(open_net, evidence):
     env = rover_link().send(Priority.NORMAL, b"BUS=28.1V", ttl=60)
     sub = net.lunar.submit(env, net.earth.receive_eid)
     caps = captures_of(net.emulator["1->2"], env)
-    net.earth.receive(1, DELIVERY_TIMEOUT_S)  # drain; IT-01 verifies delivery
+    deliveries_of(net.earth, [env])  # drain; IT-01 verifies delivery
 
     assert len(caps) == 1
     _, b = caps[0]
@@ -233,7 +259,7 @@ def test_it03_priority_maps_to_ion_class_and_is_preserved(open_net, evidence):
     sent = {p: link.send(p, f"PRIORITY-{int(p)}".encode(), ttl=120) for p in Priority}
     for env in sent.values():
         net.lunar.submit(env, net.earth.receive_eid)
-    deliveries = net.earth.receive(len(sent), DELIVERY_TIMEOUT_S)
+    deliveries = deliveries_of(net.earth, sent.values())
     delivered = {d.envelope_bytes for d in deliveries}
 
     observed = {}
@@ -270,7 +296,7 @@ def test_it04_every_byte_value_survives(open_net, evidence, size):
     payload = bytes(i % 256 for i in range(size))
     env = rover_link().send(Priority.LOW, payload, ttl=120)
     net.lunar.submit(env, net.earth.receive_eid)
-    deliveries = net.earth.receive(1, DELIVERY_TIMEOUT_S)
+    deliveries = deliveries_of(net.earth, [env])
     assert len(deliveries) == 1
     assert deliveries[0].envelope_bytes == env
     assert deliveries[0].envelope.payload == payload
@@ -294,7 +320,7 @@ def test_it05_uplink_critical_command_delivered(open_net, evidence):
     net = open_net
     env = PBSLink(device_id="Earth-Ops").send(Priority.CRITICAL, b"CMD=SAFE_MODE", ttl=300)
     net.earth.submit(env, net.lunar.receive_eid)
-    deliveries = net.lunar.receive(1, DELIVERY_TIMEOUT_S)
+    deliveries = deliveries_of(net.lunar, [env])
     caps = captures_of(net.emulator["2->1"], env)
     assert len(deliveries) == 1 and deliveries[0].envelope_bytes == env
     assert deliveries[0].envelope.priority == Priority.CRITICAL
@@ -329,7 +355,7 @@ def test_it06_ion_accepts_worked_example_bundle(open_net, evidence):
     env = rover_link().send(Priority.CRITICAL, b"ENCODED-BY-WORKED-EXAMPLE", ttl=60)
     raw = pbs_to_bpv7_bundle_mv(env, "luna", WORKED_EXAMPLE_MAP, sequence_counter=CreationTimestampCounter())
     net.emulator["1->2"].inject(raw)
-    deliveries = net.earth.receive(1, DELIVERY_TIMEOUT_S)
+    deliveries = deliveries_of(net.earth, [env])
     after = net.earth_node.bp_tallies()
     assert len(deliveries) == 1 and deliveries[0].envelope_bytes == env
     assert after["rcv"] == before["rcv"] + 1
@@ -363,7 +389,7 @@ def test_it07_ion_discards_bundle_with_bad_primary_crc(open_net, evidence):
 
     net.emulator["1->2"].inject(bytes(bad))
     net.emulator["1->2"].inject(good)
-    deliveries = net.earth.receive(2, ABSENCE_WAIT_S)
+    deliveries = deliveries_of(net.earth, [control, bad_env], ABSENCE_WAIT_S)
     assert [d.envelope_bytes for d in deliveries] == [control]
     assert net.earth_node.ion_log().count(marker) == count_before + 1
     evidence["corrupt_bundle_hex"] = bytes(bad).hex()
@@ -375,28 +401,62 @@ def test_it07_ion_discards_bundle_with_bad_primary_crc(open_net, evidence):
 
 def test_it08_envelope_without_a_whole_second_left_is_not_submitted(open_net, evidence):
     """
-    Requirements: PBS-DTN-MAP-01 Section 6.1 (an envelope with less than
-    1 ms left SHALL NOT be encapsulated); ION bp_send's whole-second
-    lifetime (DOCS/PBS-ION-MAPPING-PROFILE.md).
+    Requirements: PBS-DTN-MAP-01 Section 6.1 (an envelope whose lifetime
+    bound is under 1 ms SHALL NOT be encapsulated), applied at ION
+    bp_send's whole-second granularity (DOCS/PBS-ION-MAPPING-PROFILE.md
+    Section 2).
     Method: T.
-    Procedure: build a TTL 2 s envelope; submit it with the default 2 s
-      submission-latency bound, so no lifetime remains at c_us.
-    Pass criteria: submit raises EnvelopeExpiredError (or its subclass
-      IonLifetimeGranularityError); no spool file is written; nothing
-      crosses link 1->2; node 1's src tally does not change.
+    Procedure: build a TTL 3 s envelope whose Timestamp is 0.1 s in the
+      past; submit it with the default 2 s submission-latency bound, so at
+      c_us between 0 and 0.9 s of TTL remain: unexpired, but less than one
+      whole second.
+    Pass criteria: submit raises IonLifetimeGranularityError; no spool file
+      is written; bpsendfile is not run (node 1's ion.log gains no
+      bpsendfile line); node 1's src tally does not change.
     """
     net = open_net
     before = net.lunar_node.bp_tallies()
     spooled = sorted(net.lunar.spool.iterdir())
-    n_caps = len(net.emulator["1->2"].captures())
-    env = rover_link().send(Priority.NORMAL, b"TOO-LATE", ttl=2)
-    with pytest.raises(EnvelopeExpiredError) as info:
+    sends_before = net.lunar_node.ion_log().count("bpsendfile is running")
+    env = PBSLink(device_id="Rover-Alpha", clock_source=lambda: time.time() - 0.1).send(
+        Priority.NORMAL, b"UNDER-ONE-SECOND-LEFT", ttl=3
+    )
+    with pytest.raises(IonLifetimeGranularityError) as info:
         net.lunar.submit(env, net.earth.receive_eid)
-    time.sleep(ABSENCE_WAIT_S)
     assert sorted(net.lunar.spool.iterdir()) == spooled
-    assert len(net.emulator["1->2"].captures()) == n_caps
+    assert net.lunar_node.ion_log().count("bpsendfile is running") == sends_before
     assert net.lunar_node.bp_tallies()["src"] == before["src"]
     evidence["refusal"] = f"{type(info.value).__name__}: {info.value}"
+
+
+# -----------------------------------------------------------------------
+# IT-12  TTL 0 through ION
+# -----------------------------------------------------------------------
+
+def test_it12_ttl_zero_envelope_gets_no_expiry_lifetime(open_net, evidence):
+    """
+    Requirements: PBS-DTN-MAP-01 Section 6.1.1 and PBS-DTN-MAP-02 Section 4
+    (TTL 0: the documented no-expiry lifetime, accepted by the bundle
+    protocol agent without overflow of creation time + lifetime).
+    Method: T.
+    Procedure: submit a TTL 0 envelope; capture its bundle; wait for
+      delivery.
+    Pass criteria: the bundle's lifetime is 2 147 483 647 000 ms (2^31 - 1
+      s); ION delivers the envelope byte-identical; node 1's exp tally does
+      not rise (ION did not compute an expiration time in the past).
+    """
+    net = open_net
+    exp_before = net.lunar_node.bp_tallies().get("exp", 0)
+    env = rover_link().send(Priority.BULK, b"NEVER-EXPIRES", ttl=0)
+    net.lunar.submit(env, net.earth.receive_eid)
+    deliveries = deliveries_of(net.earth, [env])
+    caps = captures_of(net.emulator["1->2"], env)
+    assert len(caps) == 1
+    _, b = caps[0]
+    assert b.lifetime_ms == ION_NO_EXPIRY_LIFETIME_MS == (2**31 - 1) * 1000
+    assert len(deliveries) == 1 and deliveries[0].envelope_bytes == env
+    assert net.lunar_node.bp_tallies().get("exp", 0) == exp_before
+    evidence.update({"lifetime_ms": b.lifetime_ms, "bundle_hex": b.raw.hex()})
 
 
 # -----------------------------------------------------------------------
@@ -424,8 +484,8 @@ def gap_run(ion_toolchain, run_root):
         sub_held = net.lunar.submit(held, net.earth.receive_eid)
         sub_short = net.lunar.submit(short, net.earth.receive_eid)
         submitted_before_start = time.time() < start
-        deliveries = net.earth.receive(1, GAP_S + DELIVERY_TIMEOUT_S)
-        deliveries += net.earth.receive(1, ABSENCE_WAIT_S)  # SHORT must not follow
+        deliveries = deliveries_of(net.earth, [held], GAP_S + DELIVERY_TIMEOUT_S)
+        deliveries += deliveries_of(net.earth, [short], ABSENCE_WAIT_S)  # must not arrive
         result = {
             "net": net, "start": start, "held": held, "short": short,
             "sub_held": sub_held, "sub_short": sub_short,
@@ -509,3 +569,35 @@ def test_it11_ion_under_test_is_the_pinned_release(ion_toolchain, evidence):
     version = ion_toolchain.version()
     assert version == ION_VERSION_STRING
     evidence["ion_version"] = version
+
+
+# -----------------------------------------------------------------------
+# IT-13  Node lifecycle leaves nothing behind
+# -----------------------------------------------------------------------
+
+def test_it13_stopped_network_leaves_no_processes_or_shared_memory(ion_toolchain, run_root, evidence):
+    """
+    Requirement: test isolation and repeatability (NPR 7150.2D SWE-191,
+    regression testing): a stopped network leaves no ION process and no
+    shared-memory segment that a later network could attach to.
+    Method: T.
+    Procedure: start and stop a network; inspect /proc.
+    Pass criteria: while running, every node's four segments (wmKey,
+      sdrWmKey, heapKey, logKey as used) exist and its daemons run in its
+      directory; after stop, no process runs in a node directory and no
+      segment with a node's key remains.
+    """
+    net = LunarEarthNetwork(ion_toolchain, run_root / "lifecycle", always_open(60))
+    net.start()
+    nodes = list(net.ion.nodes.values())
+    try:
+        running = {n.number: len(n.processes()) for n in nodes}
+        present = {n.number: sorted(k for k in n.keys.values() if k in shm_segments()) for n in nodes}
+    finally:
+        net.stop()
+    assert all(count > 0 for count in running.values())
+    assert all(len(keys) >= 2 for keys in present.values())  # at least wm and SDR heap
+    assert all(n.processes() == [] for n in nodes)
+    remaining = set(shm_segments())
+    assert all(k not in remaining for n in nodes for k in n.keys.values())
+    evidence.update({"processes_while_running": running, "segments_while_running": present})

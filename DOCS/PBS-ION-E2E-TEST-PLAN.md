@@ -1,7 +1,7 @@
 # PBS-ION-E2E-TEST-PLAN: Test Plan, Procedures and Report Format for the ION End-to-End Demonstration
 
 **Item under test:** `pbs_ion_demo` (PBS gateway functions, link emulator, BPv7 wire decoder) with NASA/JPL ION `ion-open-source-4.2.0`, commit `568df887cb9f18aa8ec013b1a566d83215e499ae`.
-**Test code:** `TESTS/test_ion_demo_units.py` (UT-01 to UT-24) and `TESTS/ion/test_ion_end_to_end.py` (IT-01 to IT-11).
+**Test code:** `TESTS/test_ion_demo_units.py` (UT-01 to UT-25) and `TESTS/ion/test_ion_end_to_end.py` (IT-01 to IT-13).
 **Related documents:** [PBS-ION-E2E-DEMO.md](PBS-ION-E2E-DEMO.md) (demonstration), [PBS-ION-MAPPING-PROFILE.md](PBS-ION-MAPPING-PROFILE.md) (mapping profile).
 
 This document combines a software test plan, the test procedures and the test report format. Its content follows the NASA Software Engineering Handbook (NASA-HDBK-2203) topics 5.10 *Software Test Plan*, 5.14 *Software Test Procedures* and 5.11 *Software Test Report* [N4]. Each test case lists its requirements and verification method, and the matrix in Section 5 traces both ways between requirements and test cases, as NPR 7150.2D SWE-052 requires for requirements and tests [N1]. The test code is the executable procedure. Each test function's docstring repeats the requirement, method, procedure and pass criteria given here. Pale Blue Systems is not a NASA project and claims no compliance with NPR 7150.2D. The NASA documents are cited as the model the plan follows.
@@ -17,7 +17,7 @@ The tests verify that PBS-ENV-01 envelopes cross a two-node ION 4.2.0 network ov
 3. Priority: ION's class of service follows the PBS-DTN-MAP-01 Section 6.3 table, and no reserved bundle flag carries priority.
 4. Disruption: a bundle is stored while no contact is planned and forwarded when the contact opens.
 5. Interoperability: ION accepts bundles encoded by the worked example (`pbs_edge_adapter_worked_example.py`) and discards one with a corrupted CRC.
-6. Configuration: the results apply to the pinned ION release.
+6. Configuration and isolation: the results apply to the pinned ION release, and a test run leaves no ION process or shared-memory segment behind.
 
 Out of scope: BPSec, LTP and other convergence layers, custody transfer, multi-hop routing, PBS-native routing and sequence tracking, timing performance, and load. Section 8 lists these.
 
@@ -55,6 +55,7 @@ Out of scope: BPSec, LTP and other convergence layers, custody transfer, multi-h
 | R-12 | The receiving gateway rejects an envelope whose TTL has expired (age > TTL, time in the DTN domain counted). | PBS-ENV-01 §12.2; PBS-DTN-MAP-01 §7.3 |
 | R-13 | The worked example's bundles are accepted by an independent BPv7 implementation. | RFC 9171 §4 |
 | R-14 | Tests run against the pinned ION release. | NPR 7150.2D SWE-187 [N1] |
+| R-15 | A stopped network leaves no ION process and no shared-memory segment, so each run starts from the same state. | NPR 7150.2D SWE-191 [N1] (repeatable regression) |
 
 ## 5. Verification cross-reference matrix
 
@@ -66,7 +67,7 @@ Methods are those of NASA/SP-2016-6105 Rev 2 §5.3 [N3]: **T** test, **D** demon
 | R-02 | IT-01, IT-02, IT-04, IT-05, UT-18 | T |
 | R-03 | IT-01, IT-05, UT-17, UT-19 | T |
 | R-04 | IT-02, IT-08, UT-10, UT-11, UT-12, UT-13, UT-14 | T, A (UT-12 bounds every creation time up to `c_us`) |
-| R-05 | UT-15; [mapping profile §3](PBS-ION-MAPPING-PROFILE.md) | T, A |
+| R-05 | IT-12, UT-15; [mapping profile §3](PBS-ION-MAPPING-PROFILE.md) | T, A |
 | R-06 | IT-02 | T |
 | R-07 | IT-02, IT-03, IT-05, UT-16 | T |
 | R-08 | IT-02 (each captured bundle; the decoder is itself verified by UT-01 to UT-09) | T |
@@ -76,8 +77,9 @@ Methods are those of NASA/SP-2016-6105 Rev 2 §5.3 [N3]: **T** test, **D** demon
 | R-12 | UT-19 | T |
 | R-13 | IT-06 | T |
 | R-14 | IT-11, UT-24 | I |
+| R-15 | IT-13, UT-25 | T |
 
-Reverse trace (test case → requirements): IT-01 R-01–R-03; IT-02 R-01, R-02, R-04, R-06–R-08; IT-03 R-01, R-07; IT-04 R-02; IT-05 R-02, R-03, R-07; IT-06 R-13; IT-07 R-09; IT-08 R-04; IT-09 R-10; IT-10 R-11; IT-11 R-14. UT-01–UT-09 verify the wire decoder that IT-02, IT-03 and IT-05 use as their measuring instrument. UT-20–UT-23 verify the generated ION configuration and the link emulator.
+Reverse trace (test case → requirements): IT-01 R-01–R-03; IT-02 R-01, R-02, R-04, R-06–R-08; IT-03 R-01, R-07; IT-04 R-02; IT-05 R-02, R-03, R-07; IT-06 R-13; IT-07 R-09; IT-08 R-04; IT-09 R-10; IT-10 R-11; IT-11 R-14; IT-12 R-05; IT-13 R-15. UT-01–UT-09 verify the wire decoder that IT-02, IT-03 and IT-05 use as their measuring instrument. UT-20–UT-23 verify the generated ION configuration and the link emulator.
 
 ## 6. Test cases
 
@@ -92,10 +94,12 @@ Unless stated otherwise, IT preconditions are: the ION release of Section 2 is i
 | IT-05 | Uplink delivery | CRITICAL command, TTL 300 s, from node 2 to `ipn:1.2`. | Delivered byte-identical; one bundle on link 2→1 from `ipn:2.1`, ION class 2 |
 | IT-06 | Interoperability | Inject a bundle encoded by `pbs_to_bpv7_bundle_mv` on link 1→2. | Delivered byte-identical; node 2 `rcv` and `dlv` tallies +1 |
 | IT-07 | Corrupted bundle discarded | Inject a bundle with one CRC32C byte inverted, then an intact control bundle. | Only the control is delivered; node 2 logs one "CRC check failed for primary block" |
-| IT-08 | Refusal at the gateway | Submit a TTL 2 s envelope (no lifetime left at `c_us`). | `EnvelopeExpiredError`; no spool file; no datagram on the link; node 1 `src` tally unchanged |
+| IT-08 | Refusal at the gateway | Submit a TTL 3 s envelope with Timestamp 0.1 s in the past, so 0 to 0.9 s of TTL remain at `c_us`. | `IonLifetimeGranularityError`; no spool file; `bpsendfile` not run (no new log line); node 1 `src` tally unchanged |
 | IT-09 | Store-and-forward | Contact planned from now + 20 s. Submit a TTL 120 s envelope before it opens. | Bundle created before contact start; crossed the link once, at or after contact start; delivered byte-identical ≥ 1 OWLT after contact start |
 | IT-10 | Expiry in storage | In the same gap, submit a TTL 6 s envelope (ION lifetime ≈ 3 s). | Never on the link; never delivered; node 1 `exp` tally ≥ 1 |
 | IT-11 | Release under test | Ask `ionadmin` for its version. | `ION-OPEN-SOURCE-4.2.0` |
+| IT-12 | TTL 0 through ION | Submit a TTL 0 envelope. | Bundle lifetime 2 147 483 647 000 ms; delivered byte-identical; node 1 `exp` tally unchanged |
+| IT-13 | Clean stop | Start and stop a network; inspect `/proc`. | While running, each node's processes and segments exist; after stop, no process in a node directory and no segment with a node's key |
 
 | ID | Objective |
 |----|-----------|
@@ -113,7 +117,7 @@ Unless stated otherwise, IT preconditions are: the ION release of Section 2 is i
 | UT-12 | For five ages, the latest possible creation time + lifetime ≤ Timestamp + TTL |
 | UT-13 | Under 1 s left refused, exactly 1 s accepted |
 | UT-14 | Expired envelope refused |
-| UT-15 | TTL 0 gives 2 147 483 647 s, ≥ the lifetime at the largest TTL |
+| UT-15 | TTL 0 gives 2 147 483 647 s (2^31 − 1, bp_send's int limit, within 4 294 967 295 000 ms); the largest TTL is capped to it, a smaller TTL is not |
 | UT-16 | Priority → ION class table, and its monotonicity |
 | UT-17 | Bad header CRC32, trailing bytes, invalid arguments refused |
 | UT-18 | Restored envelope returned unmodified |
@@ -123,6 +127,7 @@ Unless stated otherwise, IT preconditions are: the ION release of Section 2 is i
 | UT-22 | Earth–Moon OWLT value |
 | UT-23 | Emulator delays by the OWLT, preserves order and records each datagram |
 | UT-24 | Release pin identical in the build script and the Python package |
+| UT-25 | Shared-memory keys distinct, unused by any existing segment, and in the harness's range |
 
 ### 6.1 Measurement independence
 
@@ -131,7 +136,7 @@ The checks do not rely on the code under test reporting its own success:
 - Delivery is observed through files written by ION's `bprecvfile`, not through a gateway return value.
 - Bundle conformance is checked on the bytes captured from the link. The decoder computes each CRC over the received bytes with the CRC field zeroed (RFC 9171 §4.2.2) and does not re-encode the bundle. The decoder is verified separately against known vectors (UT-02 to UT-04).
 - IT-02 and IT-03 compute their expected values from the envelope and from the specification table, not from the gateway's plan or mapping table.
-- Absence (IT-07, IT-08, IT-10) is checked with a positive control or ION's own tallies, after waiting two OWLTs plus ION's 1 s clock cycle.
+- Absence is checked with a positive control or with ION's own records. IT-07 requires the control envelope to be delivered. IT-08 requires that `bpsendfile` left no log line and that node 1's `src` tally is unchanged. IT-10 requires ION's `exp` tally. Bytes a test injects onto the link are marked as injected and are excluded when bundles from ION are inspected. Every bundle a node sends must decode.
 
 ### 6.2 Mutation check of the tests
 
@@ -140,9 +145,11 @@ Before release, the following faults were each introduced into the code under te
 | Fault introduced | Tests that failed (full suite against ION 4.2.0) |
 |------------------|--------------------------------------------------|
 | PBS LOW mapped to ION standard (1) instead of bulk (0) | UT-16, IT-03 |
-| Lifetime rounded up by 1 s | UT-10, UT-11, UT-12, UT-13, UT-15, IT-02 |
+| Lifetime rounded up by 1 s | UT-10, UT-11, UT-12, UT-13, UT-15, IT-02, IT-08, IT-12 |
 | `c_us` set to the clock reading, without the latency bound | UT-10, UT-11, UT-12, UT-13, IT-02, IT-08 |
 | Decoder CRC check skipped | UT-02, UT-03 |
+
+Each test waits for its own envelope (`deliveries_of`), so an envelope that a faulty gateway lets through in one test cannot be taken for another test's delivery. A delivery from IT-08 under the third fault showed that this was needed.
 
 IT-02 and IT-03 were strengthened after the first round of this check. In that round IT-03 passed with the first fault present, because it compared ION's class with the gateway's own table. IT-02 passed with the second and third faults present, because the 2 s latency bound absorbed the error. Both now compute their expected values independently (Section 6.1).
 
@@ -161,12 +168,12 @@ PBS_ION_REQUIRED=1 pytest -v --junitxml=ion-test-results/junit.xml
 - **Records (SWE-068 [N1]).** Each run writes `ion-test-results/as-run-<UTC>.json` with the ION version, release tag and commit, host, Python version, start and end times, and for each IT case its outcome, duration and measured values: bundle bytes in hex, block list, flags, creation time, lifetime, expiry margin, link delay and tallies. The `runs-<UTC>/` directory beside it keeps each node's generated configuration, `ion.log`, spool and inbox. CI uploads the directory and the JUnit XML as an artifact of each run.
 - **Anomalies.** A failed case is analyzed from these records before any change to the code or the test. A test's pass criteria are not relaxed to make it pass.
 - **Regression (SWE-191 [N1]).** All UT and IT cases run on every push and pull request.
-- **Timing margins.** Delivery waits up to 30 s for an event expected within about 3 s. Absence checks wait 6 s, more than two OWLTs plus ION's 1 s clock cycle. A loaded runner can lengthen delays but cannot make an absence check pass falsely: IT-07 needs its control delivered, and IT-10 needs ION's `exp` tally.
+- **Timing margins.** Delivery waits up to 30 s for an event expected within about 3 s. The IT-07 absence check waits 6 s, more than two OWLTs plus ION's 1 s clock cycle. A loaded runner can lengthen delays but cannot make an absence check pass falsely: IT-07 needs its control delivered, and IT-10 needs ION's `exp` tally.
 
 ## 8. Limitations
 
 - One host: the nodes share a clock, so the tests do not exercise clock offset between nodes. ION's creation time and the gateway's clock reading are consistent by construction.
-- UDP convergence layer only: no LTP (RFC 5326), so no segmentation or retransmission, and bundles are limited to 65 535 bytes.
+- UDP convergence layer only: no LTP (RFC 5326), so no segmentation or retransmission. Bundles are limited to 65 507 bytes over IPv4; ION's own check allows 65 535.
 - No BPSec (RFC 9172), custody transfer, fragmentation, or multi-hop contact graph routing [S3][S4].
 - Priority scheduling between classes under contention is described in the mapping profile §4.3 from ION's source and is not measured.
 - The tests verify the demonstration gateway and ION's behavior in this configuration. They do not qualify ION or the gateway for flight use.

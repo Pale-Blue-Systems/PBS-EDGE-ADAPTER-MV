@@ -46,7 +46,8 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .ion/install
-          key: ion-${{ runner.os }}-${{ hashFiles('scripts/ion-release.env') }}
+          # Rebuild when the release, the build script or the runner image changes.
+          key: ion-${{ runner.os }}-${{ env.ImageOS }}-${{ hashFiles('scripts/ion-release.env', 'scripts/build_ion.sh') }}
       - name: Build ION (pinned release)
         run: scripts/build_ion.sh "$ION_PREFIX"
       - name: Install pinned Python dependencies

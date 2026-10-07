@@ -59,7 +59,7 @@ Design choices:
 - **Upstream ION, unmodified.** The build script clones the release tag and stops if it does not resolve to the pinned commit. The gateway uses ION's distributed programs (`bpsendfile`, `bprecvfile`, `bpstats`) and links no code into ION.
 - **UDP convergence layer.** ION sends each bundle in one UDP datagram with no further framing (`bpv7/udp/libudpcla.c`), so every datagram the emulator captures is a complete serialized bundle that can be decoded and checked.
 - **Contact plan, not packet loss, models disruption.** As in operational ION, the sending node transmits only during planned contacts. The emulator adds delay and records traffic. The capture shows when ION transmitted.
-- **Two nodes on one host.** Each node has its own directory, shared-memory key and SDR, with `ION_NODE_LIST_DIR` set, as in ION's own multi-node tests. The harness never runs `killm`, which would stop every ION process on the host.
+- **Two nodes on one host.** Each node has its own directory, SDR, and shared-memory keys (`wmKey`, `sdrWmKey`, `heapKey`, `logKey`), with `ION_NODE_LIST_DIR` set, as in ION's own multi-node tests. The harness picks keys that no existing segment uses. When a node stops, the harness removes that node's segments and ends any of its processes still running. It never runs `killm`, which would stop every ION process on the host. Test IT-13 checks that a stopped network leaves nothing behind.
 
 ## 3. What the demonstration shows
 
@@ -130,7 +130,7 @@ Without `ION_PREFIX`, the ION tests are skipped and the unit tests still run. `P
 
 ## 6. Limitations
 
-The demonstration runs one host, two nodes, the UDP convergence layer, no BPSec, custody transfer or fragmentation, and single-hop routing. Bundles are limited to 65 535 bytes by ION's UDP convergence layer. Its results describe this configuration and do not qualify ION or the gateway for flight use. Test Plan §8 gives the complete list.
+The demonstration runs one host, two nodes, the UDP convergence layer, no BPSec, custody transfer or fragmentation, and single-hop routing. Bundles are limited to 65 507 bytes by IPv4 UDP; ION's UDP convergence layer refuses more than 65 535. Its results describe this configuration and do not qualify ION or the gateway for flight use. Test Plan §8 gives the complete list.
 
 ## 7. References
 

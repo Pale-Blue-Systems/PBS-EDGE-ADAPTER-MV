@@ -32,7 +32,7 @@ ION assigns the creation time after the gateway computes the lifetime. Section 6
 | Refusal | An envelope that has expired at `c_us`, or for which the bound is under 1000 ms, is not submitted (`EnvelopeExpiredError`, `IonLifetimeGranularityError`) |
 | Latency check | After `bpsendfile` exits, the gateway checks that no more than `max_submit_latency_us` has passed since its clock reading, and raises `SubmitLatencyExceeded` otherwise. `bp_send()` creates the bundle before `bpsendfile` exits, so the creation time is not later than `c_us` |
 
-ION computes DTN time as Unix time minus `EPOCH_2000_SEC` (946 684 800 s) in milliseconds (`bpv7/library/libbpP.c`, `getCurrentDtnTime`; `bpv7/library/bpP.h`), the same conversion that the PBS-DTN-MAP-01 Section 6.1 formula uses for `c_us`. Its creation time and the gateway's clock reading come from the same host clock.
+ION computes DTN time as Unix time minus its configured offset from UTC (`deltaFromUTC`) minus `EPOCH_2000_SEC` (946 684 800 s), in milliseconds (`bpv7/library/libbpP.c`, `getCurrentDtnTime`; `bpv7/library/bpP.h`). The demonstration sets no offset, so this is the conversion the PBS-DTN-MAP-01 Section 6.1 formula uses for `c_us`, and ION's creation time and the gateway's clock reading come from the same host clock. A deployment that sets an offset with `ionadmin` must apply the same offset to the gateway clock, or the Section 6.1 bound no longer holds.
 
 Rounding down to whole seconds keeps the bundle's expiry no later than the envelope's. Test IT-02 measures the difference on every run.
 
@@ -42,7 +42,7 @@ Rounding down to whole seconds keeps the bundle's expiry no later than the envel
 
 - `bp_send()` declares the lifetime as `int` seconds, so 2 147 483 647 s (`INT_MAX`) is the largest lifetime ION accepts through it. This is less than the 4 294 967 295 000 ms upper limit of the specifications.
 - ION computes the expiration time as creation time + lifetime in 64-bit unsigned integers (`uvast`) and stores it as a `time_t` count of seconds (`bpv7/library/bpP.h`, `Bundle.expirationTime`; `libbpP.c`, `computeExpirationTime`). On LP64 Linux `time_t` is 64 bits wide, so the computation does not overflow. A platform with a 32-bit `time_t` would overflow, and this value is not selected for one.
-- The gateway assigns min(no-expiry lifetime, Section 6.1 bound) to every envelope with TTL > 0, so no assigned lifetime exceeds the no-expiry lifetime (Section 6.1.1, second condition). Unit test UT-15 checks this, including at the largest TTL, 4 294 967 295 s.
+- The gateway assigns min(no-expiry lifetime, Section 6.1 bound) to every envelope with TTL > 0, so no assigned lifetime exceeds the no-expiry lifetime (Section 6.1.1, second condition). Unit test UT-15 checks the value and the cap at the largest TTL, 4 294 967 295 s. Test IT-12 sends a TTL 0 envelope through ION: the bundle carries a lifetime of 2 147 483 647 000 ms, and ION delivers it without recording an expiry.
 - The gateway reads no Service Intent frame and applies no mission expiry policy, so no PBS-DTN-MAP-02 Section 4 finite limit applies to a TTL 0 envelope.
 
 ## 4. Priority and network treatment (PBS-DTN-MAP-01 Section 6.3; PBS-DTN-MAP-02 Section 5)
@@ -83,6 +83,6 @@ ION 4.2.0 always offers all three classes. Expedited treatment cannot speed up a
 
 ## 5. Limits of this profile
 
-- **Bundle size.** ION's UDP convergence layer sends each bundle in one datagram and refuses a bundle longer than 65 535 bytes (`bpv7/udp/udpcla.h`, `UDPCLA_BUFSZ`; `libudpcla.c`, `sendBundleByUDP`). PBS_LINK accepts payloads up to 65 536 bytes (`MAX_PAYLOAD_SIZE_DEFAULT`). A deployment carrying envelopes near that size uses a convergence layer without this limit, such as LTP (RFC 5326) or TCP.
+- **Bundle size.** ION's UDP convergence layer sends each bundle in one datagram and refuses a bundle longer than 65 535 bytes (`bpv7/udp/udpcla.h`, `UDPCLA_BUFSZ`; `libudpcla.c`, `sendBundleByUDP`). Over IPv4 a UDP datagram carries at most 65 507 bytes, so a bundle of 65 508 to 65 535 bytes passes ION's check and then fails to send. PBS_LINK accepts payloads up to 65 536 bytes (`MAX_PAYLOAD_SIZE_DEFAULT`). A deployment carrying envelopes near that size uses a convergence layer without this limit, such as LTP (RFC 5326) or TCP.
 - **Security.** No BPSec block is added (PBS-DTN-MAP-02 Section 7; RFC 9172). The header CRC32 covers the 44-byte header only (PBS-ENV-01 Section 16.2). ION's payload-block CRC (CRC-16, observed in every captured bundle) detects corruption on the link but gives no authentication.
 - **Inbound.** The receiving gateway checks the restored envelope (magic, header CRC32, length, and TTL expiry counted from Timestamp, PBS-ENV-01 Section 12.2). It does not implement PBS sequence tracking or PBS-native routing (PBS-DTN-MAP-01 Section 7.2).

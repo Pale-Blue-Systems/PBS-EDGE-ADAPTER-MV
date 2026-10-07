@@ -43,6 +43,7 @@ class Capture:
     arrival_unix_ns: int     # host clock when the datagram reached the emulator
     release_unix_ns: int     # host clock when the emulator sent it on
     data: bytes
+    injected: bool = False   # put on the link by inject(), not received from a node
 
 
 class LinkChannel:
@@ -69,7 +70,7 @@ class LinkChannel:
         self._tx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self._lock = threading.Lock()
         self._cv = threading.Condition(self._lock)
-        self._pending: List[Tuple[int, int, int, bytes]] = []  # (due, seq, arrival, data)
+        self._pending: List[Tuple[int, int, int, bytes, bool]] = []  # (due, seq, arrival, data, injected)
         self._captures: List[Capture] = []
         self._seq = 0
         self._stop = threading.Event()
@@ -97,8 +98,12 @@ class LinkChannel:
         self._tx.close()
 
     def inject(self, data: bytes) -> None:
-        """Carry bytes over this channel as if they had arrived on listen_port."""
-        self._enqueue(bytes(data))
+        """
+        Carry bytes over this channel as if they had arrived on listen_port.
+        The capture is marked injected, so that tests can tell bundles
+        written by a node from bytes they supplied themselves.
+        """
+        self._enqueue(bytes(data), injected=True)
 
     def captures(self) -> List[Capture]:
         with self._lock:
@@ -115,12 +120,12 @@ class LinkChannel:
                 self._cv.wait(remaining)
             return list(self._captures)
 
-    def _enqueue(self, data: bytes) -> None:
+    def _enqueue(self, data: bytes, injected: bool = False) -> None:
         arrival = self._clock_ns()
         with self._cv:
             seq = self._seq
             self._seq += 1
-            heapq.heappush(self._pending, (arrival + self.owlt_ns, seq, arrival, data))
+            heapq.heappush(self._pending, (arrival + self.owlt_ns, seq, arrival, data, injected))
             self._cv.notify_all()
 
     def _receive_loop(self) -> None:
@@ -146,14 +151,14 @@ class LinkChannel:
                         self._cv.wait(0.05)
                 if self._stop.is_set():
                     return
-                _, seq, arrival, data = heapq.heappop(self._pending)
+                _, seq, arrival, data, injected = heapq.heappop(self._pending)
             try:
                 self._tx.sendto(data, self._target)
             except OSError:
                 pass  # UDP: a send failure is a lost datagram, as on a real link
             release = self._clock_ns()
             with self._cv:
-                self._captures.append(Capture(self.name, seq, arrival, release, data))
+                self._captures.append(Capture(self.name, seq, arrival, release, data, injected))
                 self._cv.notify_all()
 
 

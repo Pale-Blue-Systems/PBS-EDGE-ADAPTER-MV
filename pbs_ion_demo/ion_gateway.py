@@ -298,9 +298,18 @@ class IonGateway:
         return Submission(plan, self.send_eid, destination_eid, spool_path, exit_us)
 
     def start_receiver(self, max_files: int) -> None:
-        """Start bprecvfile on the receive EID; it exits after max_files payloads."""
+        """
+        Start bprecvfile on the receive EID; it exits after max_files
+        payloads (0: no limit). Each bprecvfile process numbers its files
+        from testfile1, so the gateway restarts its count and removes any
+        testfile left by an earlier receiver; receive() has already moved
+        every file it collected to the inbox.
+        """
         if self._receiver is not None:
             raise IonError("receiver already running")
+        for stale in self.node.directory.glob("testfile*"):
+            stale.unlink()
+        self._collected = 0
         self._receiver = self.node.popen(
             ["bprecvfile", self.receive_eid, str(max_files)], "bprecvfile.log"
         )
@@ -344,6 +353,10 @@ class IonGateway:
         return deliveries
 
     def _file_complete(self, path: Path) -> bool:
-        """bprecvfile logs "has created '<name>'" after it closes the file."""
+        """
+        bprecvfile logs "has created '<name>'" after its last write() to the
+        file and just before close() (ION 4.2.0 bpv7/utils/bprecvfile.c), so
+        the file's contents are complete when the message appears.
+        """
         log = self.node.ion_log()
         return f"has created '{path.name}'" in log

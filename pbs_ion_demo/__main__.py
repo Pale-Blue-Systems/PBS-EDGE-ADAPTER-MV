@@ -75,7 +75,7 @@ def describe_bundle(raw: bytes) -> str:
 
 def find(channel, envelope: bytes):
     for c in channel.captures():
-        if decode_bundle(c.data).payload == envelope:
+        if not c.injected and decode_bundle(c.data).payload == envelope:
             return c
     return None
 
@@ -158,7 +158,7 @@ def main(argv=None) -> int:
     ap.add_argument("--ion-prefix", help="ION installation prefix (default: $ION_PREFIX or the PATH)")
     ap.add_argument("--run-dir", type=Path,
                     default=Path("ion-demo-runs") / time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()))
-    ap.add_argument("--gap-s", type=int, default=15, help="length of the contact gap in step 3")
+    ap.add_argument("--gap-s", type=int, default=15, help="length of the contact gap in step 4")
     args = ap.parse_args(argv)
 
     tc = IonToolchain.locate(args.ion_prefix)

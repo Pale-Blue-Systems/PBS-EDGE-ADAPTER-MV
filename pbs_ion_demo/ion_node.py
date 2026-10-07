@@ -16,20 +16,31 @@ therefore run with cwd set to its node's directory (the method of ION's own
 multi-node tests, e.g. tests/ipn-exit-route/dotest in ION 4.2.0).
 
 This module never runs killm, which stops every ION process on the host.
+Each node's System V shared-memory segments use keys the harness chooses
+and records (wmKey, sdrWmKey, heapKey, logKey in ionconfig), chosen so
+that no segment with that key exists when the node is configured. When
+the node stops, the harness removes the segments with its own keys and
+no attached process, so a run neither leaks memory nor leaves a stale
+segment that a later node could attach to. ION's host-wide segments and
+semaphores, shared by every ION node on the host, are left in place.
 """
 
 from __future__ import annotations
 
 import datetime
+import ctypes
+import ctypes.util
 import os
 import re
+import secrets
+import signal
 import shutil
 import subprocess
 import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence, Tuple
 
 # Programs the demonstration runs; all are installed by ION 4.2.0 "make install".
 ION_PROGRAMS = (
@@ -117,7 +128,7 @@ class IonNode:
     directory: Path
     induct_port: int
     peer_ports: Dict[int, int]          # peer node number -> emulator port toward it
-    wm_key: int
+    keys: Dict[str, int]                # ionconfig key name -> System V key
     sdr_name: str
     endpoints: Sequence[int] = (0, 1, 2)
     network: "IonNetwork" = field(repr=False, default=None)  # type: ignore[assignment]
@@ -130,11 +141,14 @@ class IonNode:
     def render(self, contacts: Sequence[Contact]) -> Dict[str, str]:
         n = self.number
         ionconfig = (
-            f"wmKey {self.wm_key}\n"
+            f"wmKey {self.keys['wmKey']}\n"
             f"sdrName {self.sdr_name}\n"
             "wmSize 8000000\n"
+            f"sdrWmKey {self.keys['sdrWmKey']}\n"
             "configFlags 1\n"       # SDR in DRAM only (ionconfig(5))
             "heapWords 400000\n"
+            f"heapKey {self.keys['heapKey']}\n"
+            f"logKey {self.keys['logKey']}\n"
             f"pathName {self.directory}\n"
         )
         ionrc = [f"1 {n} node.ionconfig", "s", "m horizon +0"]
@@ -198,15 +212,26 @@ class IonNode:
             cwd=self.directory, env=self.network.env(), stdout=log, stderr=subprocess.STDOUT,
         )
 
+    # Messages with which the administration programs report a failed
+    # initialization or start while still exiting 0 (their exit status is
+    # set only by the "t" command).
+    START_FAILURES = ("can't initialize", "wrong profile", "can't start", "can't attach")
+
     def start(self) -> None:
-        # ionadmin, ionsecadmin and bpadmin exit 0 after executing their
-        # files; "1" in each file initializes, "s" starts the daemons.
+        # "1" in each file initializes, "s" starts the daemons.
         for program, rc in (("ionadmin", "node.ionrc"), ("ionsecadmin", "node.ionsecrc"),
                             ("bpadmin", "node.bprc"), ("ipnadmin", "node.ipnrc")):
             cp = self.run([program, rc], check=False)
-            (self.directory / "start.log").open("a").write(cp.stdout + cp.stderr)
-            if cp.returncode != 0:
-                raise IonError(f"node {self.number}: {program} {rc} exited {cp.returncode}")
+            output = cp.stdout + cp.stderr
+            with (self.directory / "start.log").open("a") as log:
+                log.write(output)
+            failed = [m for m in self.START_FAILURES if m in output.lower()]
+            if cp.returncode != 0 or failed:
+                raise IonError(
+                    f"node {self.number}: {program} {rc} exited {cp.returncode}"
+                    + (f" reporting {failed}" if failed else "")
+                    + f"; see {self.directory / 'start.log'}"
+                )
 
     def bp_is_running(self, wait_s: int = 30) -> bool:
         """
@@ -216,9 +241,40 @@ class IonNode:
         cp = self.run(["bpadmin"], input_text=f"t p {wait_s}\n", timeout_s=wait_s + 10, check=False)
         return cp.returncode == 1
 
-    def stop(self) -> None:
+    def stop(self, wait_s: float = 15) -> None:
+        """
+        Stop BP ("bpadmin .") and ION ("ionadmin ."), wait for this node's
+        processes to exit, end any that remain, then remove this node's
+        shared-memory segments.
+        """
         self.run(["bpadmin", "."], timeout_s=60, check=False)
         self.run(["ionadmin", "."], timeout_s=60, check=False)
+        deadline = time.monotonic() + wait_s
+        while self.processes() and time.monotonic() < deadline:
+            time.sleep(0.2)
+        for sig in (signal.SIGTERM, signal.SIGKILL):
+            for pid in self.processes():
+                try:
+                    os.kill(pid, sig)
+                except ProcessLookupError:
+                    pass
+            end = time.monotonic() + 5
+            while self.processes() and time.monotonic() < end:
+                time.sleep(0.1)
+        remove_shm_segments(set(self.keys.values()))
+
+    def processes(self) -> List[int]:
+        """PIDs of processes whose working directory is this node's directory (Linux /proc)."""
+        pids = []
+        for entry in os.listdir("/proc"):
+            if not entry.isdigit() or int(entry) == os.getpid():
+                continue
+            try:
+                if os.readlink(f"/proc/{entry}/cwd") == str(self.directory):
+                    pids.append(int(entry))
+            except OSError:
+                continue
+        return pids
 
     def ion_log(self) -> str:
         p = self.directory / "ion.log"
@@ -243,13 +299,55 @@ class IonNode:
         return tallies
 
 
+def shm_segments() -> Dict[int, Tuple[int, int]]:
+    """System V shared-memory segments: {key: (shmid, attached processes)} (Linux /proc)."""
+    segments: Dict[int, Tuple[int, int]] = {}
+    with open("/proc/sysvipc/shm") as f:
+        header = f.readline().split()
+        k, i, n = header.index("key"), header.index("shmid"), header.index("nattch")
+        for line in f:
+            cols = line.split()
+            segments[int(cols[k])] = (int(cols[i]), int(cols[n]))
+    return segments
+
+
+def remove_shm_segments(keys: set) -> List[int]:
+    """Remove the segments with these keys that no process has attached; return their keys."""
+    libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
+    removed = []
+    for key, (shmid, nattch) in shm_segments().items():
+        if key in keys and nattch == 0:
+            if libc.shmctl(ctypes.c_int(shmid), ctypes.c_int(0), None) == 0:  # IPC_RMID
+                removed.append(key)
+    return removed
+
+
+def allocate_keys(names: Sequence[str], exclude: set) -> Dict[str, int]:
+    """
+    Random System V keys, one per name, that no existing segment uses and
+    that are not in exclude. Keys are drawn from 0x10000000-0x6FFFFFFF,
+    clear of ION's default keys (e.g. 65281) and of the small keys
+    sm_GetUniqueKey() assigns.
+    """
+    in_use = set(shm_segments()) | set(exclude)
+    keys: Dict[str, int] = {}
+    for name in names:
+        while True:
+            key = 0x10000000 + secrets.randbelow(0x60000000)
+            if key not in in_use:
+                in_use.add(key)
+                keys[name] = key
+                break
+    return keys
+
+
 class IonNetwork:
     """
     A set of ION nodes on one host, each node in its own directory under
     run_dir, all registered in run_dir/ion_nodes.
     """
 
-    _key_counter = 0
+    _sdr_counter = 0
 
     def __init__(self, toolchain: IonToolchain, run_dir: Path) -> None:
         self.toolchain = toolchain
@@ -268,17 +366,15 @@ class IonNetwork:
         return env
 
     def add_node(self, number: int, induct_port: int, peer_ports: Dict[int, int]) -> IonNode:
-        # Shared-memory keys unique to this process and network, clear of
-        # ION's default key 65281 and of the keys ION's own tests use.
-        IonNetwork._key_counter += 1
-        wm_key = 70_000 + (os.getpid() % 10_000) * 10 + (IonNetwork._key_counter % 10)
+        IonNetwork._sdr_counter += 1
+        taken = {k for n in self.nodes.values() for k in n.keys.values()}
         node = IonNode(
             number=number,
             directory=self.run_dir / f"node{number}",
             induct_port=induct_port,
             peer_ports=dict(peer_ports),
-            wm_key=wm_key + number * 100_000,
-            sdr_name=f"pbsion{os.getpid()}n{number}k{IonNetwork._key_counter}",
+            keys=allocate_keys(("wmKey", "sdrWmKey", "heapKey", "logKey"), taken),
+            sdr_name=f"pbsion{os.getpid()}n{number}s{IonNetwork._sdr_counter}",
         )
         node.network = self
         node.directory.mkdir(parents=True, exist_ok=True)
