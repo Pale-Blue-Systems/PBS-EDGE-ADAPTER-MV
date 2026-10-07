@@ -49,7 +49,7 @@ An Authority Context consists of the following components:
 
 All components are defined through explicit configuration.
 
-### 2.2 Authority Identifier
+### 2.2 Authority Identifier (planned)
 
 The **Authority Identifier** uniquely names the authority domain.
 
@@ -61,7 +61,7 @@ Characteristics:
 
 The Authority Identifier is not transmitted within the PBS payload. It is adapter configuration, distinct from the `authority_id` that a PBS-AUTH-01 frame carries in the payload (Section 4).
 
-### 2.3 Namespace Root
+### 2.3 Namespace Root (planned)
 
 The **Namespace Root** defines the top-level namespace used when constructing BPv7 Endpoint Identifiers.
 
@@ -123,7 +123,7 @@ Each PBS Edge Adapter instance is bound to one Authority Context via configurati
 
 The binding is static for the lifetime of the adapter instance.
 
-### 5.2 Configuration Inputs
+### 5.2 Configuration Inputs (planned)
 
 Authority Context configuration includes:
 
@@ -218,6 +218,6 @@ Such extensions do not alter the correctness of the model defined herein.
 
 ## 12. Summary
 
-The Authority Context establishes a clear and deterministic foundation for authority-aware routing at the network edge, which the bundle protocol agent performs from the routing configuration the adapter supplies (PBS-DTN-MAP-02 Section 8).
+The planned Authority Context model establishes a clear and deterministic foundation for authority-aware routing at the network edge, which the bundle protocol agent performs from the routing configuration the adapter supplies (PBS-DTN-MAP-02 Section 8).
 
 By explicitly binding PBS Edge Adapters to a single authority namespace, the model enables safe coexistence of multiple authorities over shared BPv7 transport environments.

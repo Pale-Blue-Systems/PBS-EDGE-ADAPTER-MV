@@ -45,9 +45,8 @@ flowchart LR
 
   P1 --> IN --> VAL --> ENC
   AC --> ENC
-  ENC --> RT
-  RT --> IO
-  IO --> BA --> NET --> BA2
+  ENC --> IO --> BA --> NET --> BA2
+  ENC -.-> RT -.-> IO
   BA2 --> NET --> BA
   BA --> IO
   IO --> EXT --> OUT --> C1

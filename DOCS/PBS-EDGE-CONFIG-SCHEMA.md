@@ -117,7 +117,7 @@ authority_context:
 
 Each rover, and each surface asset that originates bundles, runs its own ION bundle protocol agent node, so `source_format` yields that asset's own node ID, a dtn EID with an empty demux (RFC 9171 Sections 4.2.5.1.1 and 5.2).
 
-### B.4.2 EID Rules
+### B.4.2 EID Rules (planned)
 
 The `eid_rules` object defines how PBS identifiers are transformed into BPv7 EIDs.
 
@@ -172,7 +172,7 @@ routing:
 | `default_lifetime_seconds` | integer | Default BPv7 bundle lifetime: the no-expiry lifetime for TTL 0 and the upper bound otherwise; the remaining TTL bounds each lifetime (PBS-DTN-MAP-01 Sections 6.1 and 6.1.1) |
 | `routes` | list | Deterministic routing table |
 
-### B.6.2 Route Entries
+### B.6.2 Route Entries (planned)
 
 Each route entry has the following structure:
 
@@ -275,4 +275,4 @@ With identical configuration, the same authority context name always yields the 
 
 This appendix defines the **minimum viable configuration schema** required to operate a PBS Edge Adapter instance.
 
-The schema establishes explicit authority binding, deterministic routing configuration for the bundle protocol agent, and unambiguous integration with BPv7 transport infrastructure.
+The planned schema establishes explicit authority binding, deterministic routing configuration for the bundle protocol agent, and unambiguous integration with BPv7 transport infrastructure.

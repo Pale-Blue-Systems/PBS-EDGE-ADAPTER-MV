@@ -83,7 +83,7 @@ An **Authority Context** represents the administrative and routing namespace wit
 
 Each adapter instance is configured with exactly one active Authority Context at a time.
 
-### 5.2 Usage
+### 5.2 Planned Usage
 
 The Authority Context is used to:
 
