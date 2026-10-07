@@ -141,7 +141,7 @@ In the planned adapter (in development):
 
 ## 9. Transport Integration
 
-A deployment requires a BPv7 bundle protocol agent that accepts bundles for forwarding and delivers received bundles to the adapter. The NASA/JPL Interplanetary Overlay Network (ION, <https://github.com/nasa-jpl/ION-DTN>) is one such agent; its `bpv7` module implements RFC 9171. The worked example produces bundle bytes and does not connect to an agent.
+A deployment requires a BPv7 bundle protocol agent that accepts bundles for forwarding and delivers received bundles to the adapter. The NASA/JPL Interplanetary Overlay Network (ION, <https://github.com/nasa-jpl/ION-DTN>) is one such agent; its `bpv7` module implements RFC 9171. The worked example produces bundle bytes and does not connect to an agent. The end-to-end demonstration in `pbs_ion_demo/` connects to ION 4.2.0: ION creates the bundles and assigns their creation timestamps (PBS-DTN-MAP-01 Section 6.1), and the demonstration's gateway follows the mapping profile in [PBS-ION-MAPPING-PROFILE.md](PBS-ION-MAPPING-PROFILE.md). See [PBS-ION-E2E-DEMO.md](PBS-ION-E2E-DEMO.md).
 
 The LunaNet Interoperability Specification, Version 5 (LNIS V005, NASA, ESA and JAXA, 29 January 2025), Section 3.1.2, specifies BPv7 for LunaNet DTN network communications services.
 
