@@ -8,6 +8,11 @@ documentation, specifications, and illustrative artifacts rather than production
 
 ## [Unreleased]
 
+### ION demonstration report
+
+#### Added
+- `python -m pbs_ion_demo` records evidence in `report.json` for each step: each envelope's header fields and bytes; the gateway's request to ION (lifetime, class of service, `c_us`); each bundle as captured on the link, with its bytes, decoded primary block, blocks, and link arrival and release times; and each delivery. The report also records the network parameters and the software versions, including this repository's commit and whether the working tree was modified. UT-26 checks the records against the decoded bytes. The public website's ION demonstration page shows one report as produced.
+
 ### ION end-to-end demonstration
 
 #### Added

@@ -93,7 +93,14 @@ Nodes up: ipn:1 (lunar) and ipn:2 (Earth); one-way light time 1.2822 s
 10 of 10 checks passed. Report: ion-demo-runs/<UTC>/report.json
 ```
 
-The run directory keeps each node's generated ION configuration, `ion.log`, spooled and delivered envelopes, and `report.json`.
+The run directory keeps each node's generated ION configuration, `ion.log`, spooled and delivered envelopes, and `report.json`. For each step, `report.json` records the checks and the evidence behind them:
+
+- each envelope's header fields and bytes;
+- what the gateway asked ION for (lifetime, class, `c_us`);
+- each bundle as captured on the link: its bytes, decoded primary block and blocks, and the times it reached and left the link emulator;
+- each delivery.
+
+It also records the network parameters and the software versions, including the commit of this repository. The [public website](https://www.palebluesystems.space/ion-demo) shows one such report as produced.
 
 ## 4. How to run
 
