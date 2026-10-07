@@ -143,6 +143,15 @@ Planned additions (in development):
 - **BPv7:** IETF RFC 9171, *Bundle Protocol Version 7*, <https://www.rfc-editor.org/rfc/rfc9171>.
 - **LunaNet:** LunaNet Interoperability Specification, Version 5 (LNIS V005, NASA, ESA and JAXA, 29 January 2025), Section 3.1.2: "The Bundle Protocol version 7 (BPv7) shall be used" for DTN network communications services. <https://www.nasa.gov/wp-content/uploads/2025/02/lunanet-interoperability-specification-v5-baseline.pdf>
 
+### 5. Alignment with Existing Standards
+
+The reference design aligns with:
+
+- **Bundle Protocol Version 7 (BPv7)** as defined in RFC 9171 and corresponding CCSDS recommendations
+- Operational DTN architectures that employ established bundle agents
+
+By grounding the PBS Edge Adapter in existing standards, the repository provides a concrete basis for interoperability analysis and future discussion.
+
 ---
 
 ## Status

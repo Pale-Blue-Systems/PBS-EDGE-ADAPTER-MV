@@ -547,6 +547,8 @@ def pbs_to_bpv7_bundle_mv(
 
     now_us = clock_us()
     lifetime_ms = bundle_lifetime_ms(envelope, now_us, default_lifetime_ms)
+    # RFC 9171 DTN time is seconds since 2000-01-01T00:00:00Z (DTN epoch),
+    # but implementations often supply DTN time via local BP stack.
     creation_time_dtn = unix_us_to_dtn_ms(now_us)
     if creation_seq is None:
         counter = ADAPTER_SEQUENCE_COUNTER if sequence_counter is None else sequence_counter
